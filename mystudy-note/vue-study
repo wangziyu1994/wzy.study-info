@@ -1,0 +1,14 @@
+1、引入vue.js  <script src="[url]"></script>
+2、v-bind:[属性名]  v-if  v-for  v-on:[事件名]
+3、var a=new Vue({
+el:'',                --标签的id
+data:{
+[属性名]:[属性值,可以为对值，对象，数组]
+...
+},
+methods:{
+[函数名]:function(){}
+}
+                  })
+                  
+                  

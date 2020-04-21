@@ -1,0 +1,17 @@
+spring Java的配置方式
+多线程
+1.使用@EnableAsync 标明异步配置类
+2.重写public Executor getAsyncExecutor()方法 可设置线程池 
+ThreadPoolTaskExecutor task=new ThreadPoolTaskExecutor();
+task.setCorePoolSize();
+task.setPoolSize();
+task.setQueueCapacity();
+task.initialize();
+return task;
+
+3.使用@Async 开启异步方法
+==============================================================
+
+定时任务，计划任务
+1.使用@EnableScheduling 标明计划配置类
+2.使用@Scheduled声明这是一个计划任务 包含cron定时任务 fixDelay fixRate每隔固定时间段执行

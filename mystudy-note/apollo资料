@@ -1,0 +1,38 @@
+1、Apollo服务端共需要两个数据库：ApolloPortalDB和ApolloConfigDB
+
+Apollo服务端共需要两个数据库：ApolloPortalDB和ApolloConfigDB
+
+编辑demo.sh
+
+# apollo config db info
+apollo_config_db_url=jdbc:mysql://localhost:3306/ApolloConfigDB?characterEncoding=utf8
+apollo_config_db_username=用户名
+apollo_config_db_password=密码（如果没有密码，留空即可）
+
+# apollo portal db info
+apollo_portal_db_url=jdbc:mysql://localhost:3306/ApolloPortalDB?characterEncoding=utf8
+apollo_portal_db_username=用户名
+apollo_portal_db_password=密码（如果没有密码，留空即可）
+
+2、Apollo的quick start脚本会在本地启动三个端口分别为8070、8080、8090的服务，需在确保端口未被占用的情况下执行脚本
+
+./demo.sh start 
+./demo.sh stop
+
+通过访问http://localhost:8070/可访问web页面的服务端。
+
+初始账号/密码为：admin/apollo
+
+
+===========================================================================================
+Apollo客户端
+Mac/Linux上文件位置为/opt/data/{appId}/config-cache
+Windows上文件位置为C:\opt\data{appId}\config-cache
+本地配置文件会以{appId}+{cluster}+{namespace}.properties的文件名和格式存储，当获取不到网络配置时会从这个配置中取值
+
+spring-boot方式
+<dependency>
+    <groupId>com.ctrip.framework.apollo</groupId>
+    <artifactId>apollo-client</artifactId>
+    <version>1.1.0</version>
+</dependency>

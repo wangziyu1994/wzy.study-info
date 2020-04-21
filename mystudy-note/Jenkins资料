@@ -1,0 +1,28 @@
+Jenkins 系统配置文件
+/etc/init.d/jenkins?
+Jenkins 日志文件目录
+/etc/logrotate.d/jenkins
+/var/log/jenkins
+Jenkins 配置文件，包括“端口”，“JENKINS_HOME”等都可以在这里配置
+/etc/sysconfig/jenkins
+jenkins安装目录，WAR包会放在这里
+/usr/lib/jenkins
+/usr/lib/jenkins/jenkins.war
+Jenkins 启动配置文件
+/usr/sbin/rcjenkins
+Jenkins 缓存文件目录
+/var/cache/jenkins
+Jenkins 默认的的JENKINS_HOME
+/var/lib/jenkins
+
+====================================================
+
+jenkins 的启动/状态/停止
+
+启动 jenkins : systemctl start jenkins.service
+
+jenkins 状态?: systemctl status jenkins.service
+
+停止 jenkins : systemctl sotp jenkins.service
+
+
