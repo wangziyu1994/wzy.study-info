@@ -15,3 +15,47 @@ b,回滚事务
 
 rollback work[可选]  to savepoint [回滚结束至指定的记录点]  | force [回滚强制提交的事务id] 
 
+c,设置事务
+set transaction 
+read only/read write  只读/读写
+isolation level    serialize/read committed 	 [事务的隔离级别]
+use rollback segment 
+name transaction_name  指定事务的名字
+
+d,锁表
+lock table tables 
+in lock_mode  : lock_mode 是以下值之一
+lock_mode	                   描述
+ROW SHARE	允许同时访问表，但阻止用户锁定整个表以进行独占访问。
+ROW EXCLUSIVE	允许对表进行并发访问，但阻止用户以独占访问方式锁定整个表并以共享方式锁定表。
+SHARE UPDATE	允许同时访问表，但阻止用户锁定整个表以进行独占访问。
+SHARE	允许并发查询，但用户无法更新锁定的表。
+SHARE ROW EXCLUSIVE	用户可以查看表中的记录，但是无法更新表或锁定SHARE表中的表。
+EXCLUSIVE	允许查询锁定的表格，但不能进行其他活动。
+
+wait [秒数]/nowait 它指定数据库将等待(达到指定整数的特定秒数)以获取DML锁定。/它指定数据库不应该等待释放锁。
+
+
+3、oracle 逻辑存储结构
+表空间>段>区>块
+
+a,tablespaces ：对应多个数据文件，最大的逻辑存储单元,一个表空间只能属于一个数据库
+查询数据库表空间: select tablespace_name from dba_tablespaces;
+
+
+b,segement :段可以有表段、索引段、回滚段、临时段和高速缓存段等。
+
+c,extents :当一段中间所有空间已完全使用，oracle 为该段分配一个新的范围。
+
+d,data block :当用户从表中选择数据时，选择操作从数据库文件中以块为单位读取或者提取数据。例如 Oracle 块的大小为 8kb，即使只想检索4kb的大小的数据，也必须读取整个8kb的数据块
+
+查询当前设置的数据块 大小
+show parameter db_block_size;
+
+
+
+
+
+
+
+
