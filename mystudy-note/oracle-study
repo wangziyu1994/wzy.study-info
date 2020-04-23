@@ -1,0 +1,17 @@
+1, oracle 登录
+sqlplus 
+sys as sysdba
+enter按键
+2,oracle 事务
+a,提交事务
+commit work[可选]  comment [提交的注释内容]  write/nowait  immediate/batch  force [设置强制提交的事务id]  
+
+WORK：可选的。它被Oracle添加为符合SQL标准。使用或不使用WORK参数来执行COMMIT将产生相同的结果。
+COMMENT clause：可选的。 它用于指定与当前事务关联的注释。 该注释最多可以包含在单引号中的255个字节的文本中。 如果出现问题，它将与事务ID一起存储在名为DBA_2PC_PENDING的系统视图中。
+WRITE clause：可选的。 它用于指定将已提交事务的重做信息写入重做日志的优先级。 用这个子句，有两个参数可以指定：WAIT 或 NOWAIT (如果省略，WAIT是默认值)IMMEDIATE或BATCH(IMMEDIATE是省略时的默认值)
+FORCE clause：可选的。 它用于强制提交可能已损坏或有疑问的事务。 有了这个子句，可以用3种方式指定FORCE：FORCE'string'，[integer]或FORCE CORRUPT_XID'string'或FORCE CORRUPT_XID_ALL
+
+b,回滚事务
+
+rollback work[可选]  to savepoint [回滚结束至指定的记录点]  | force [回滚强制提交的事务id] 
+
