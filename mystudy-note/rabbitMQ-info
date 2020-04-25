@@ -1,0 +1,55 @@
+1,rabbitmq安装
+ wget https://packages.erlang-solutions.com/erlang-solutions-1.0-1.noarch.rpi
+
+ rpm -Uvh erlang-solutions-1.0-1.noarch.rpm
+
+2,检查rabbitMQ是否启动
+chkconfig rabbitmq-server on
+/sbin/service rabbit-server start
+
+
+
+3,安装web管理界面
+rabbitmq-plugins enable  rabbitmq_management
+
+
+4,设置rabbitMQ的远程登录
+1,创建账号
+rabbitmqctl add_user agan 123456
+
+2,设置用户角色
+rabbitmqctl  set_user_tags agan administrator
+
+
+3,设置用户权限
+rabbitmqctl  set  permissions -p "/" agan ".*" ".*"  ".*"
+
+4,设置完成后可以查看当前用户和角色
+rabbitmqctl list_users
+
+默认端口 15672
+
+
+5，使用rabbitmq的好处
+
+1,可以异步发消息，实现异步处理不同业务场景的任务
+2,解耦，如果要接入新的服务，或者要删除原有服务，那么只需订阅 或者取消订阅中间的MQ
+3，实现对流量的控制，防止服务因为流量过大而宕机.
+
+
+
+6,spring-boot  rabbitmq集成
+1,添加依赖jar包
+2,配置applicaiton.properties
+3,
+
+
+7,rabbitmq 解析
+a,queue  队列
+
+b,channel 渠道
+
+c,routekey 路由键
+
+d,exchanges  交换器
+
