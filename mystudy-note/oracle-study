@@ -1,0 +1,61 @@
+1, oracle 登录
+sqlplus 
+sys as sysdba
+enter按键
+2,oracle 事务
+a,提交事务
+commit work[可选]  comment [提交的注释内容]  write/nowait  immediate/batch  force [设置强制提交的事务id]  
+
+WORK：可选的。它被Oracle添加为符合SQL标准。使用或不使用WORK参数来执行COMMIT将产生相同的结果。
+COMMENT clause：可选的。 它用于指定与当前事务关联的注释。 该注释最多可以包含在单引号中的255个字节的文本中。 如果出现问题，它将与事务ID一起存储在名为DBA_2PC_PENDING的系统视图中。
+WRITE clause：可选的。 它用于指定将已提交事务的重做信息写入重做日志的优先级。 用这个子句，有两个参数可以指定：WAIT 或 NOWAIT (如果省略，WAIT是默认值)IMMEDIATE或BATCH(IMMEDIATE是省略时的默认值)
+FORCE clause：可选的。 它用于强制提交可能已损坏或有疑问的事务。 有了这个子句，可以用3种方式指定FORCE：FORCE'string'，[integer]或FORCE CORRUPT_XID'string'或FORCE CORRUPT_XID_ALL
+
+b,回滚事务
+
+rollback work[可选]  to savepoint [回滚结束至指定的记录点]  | force [回滚强制提交的事务id] 
+
+c,设置事务
+set transaction 
+read only/read write  只读/读写
+isolation level    serialize/read committed 	 [事务的隔离级别]
+use rollback segment 
+name transaction_name  指定事务的名字
+
+d,锁表
+lock table tables 
+in lock_mode  : lock_mode 是以下值之一
+lock_mode	                   描述
+ROW SHARE	允许同时访问表，但阻止用户锁定整个表以进行独占访问。
+ROW EXCLUSIVE	允许对表进行并发访问，但阻止用户以独占访问方式锁定整个表并以共享方式锁定表。
+SHARE UPDATE	允许同时访问表，但阻止用户锁定整个表以进行独占访问。
+SHARE	允许并发查询，但用户无法更新锁定的表。
+SHARE ROW EXCLUSIVE	用户可以查看表中的记录，但是无法更新表或锁定SHARE表中的表。
+EXCLUSIVE	允许查询锁定的表格，但不能进行其他活动。
+
+wait [秒数]/nowait 它指定数据库将等待(达到指定整数的特定秒数)以获取DML锁定。/它指定数据库不应该等待释放锁。
+
+
+3、oracle 逻辑存储结构
+表空间>段>区>块
+
+a,tablespaces ：对应多个数据文件，最大的逻辑存储单元,一个表空间只能属于一个数据库
+查询数据库表空间: select tablespace_name from dba_tablespaces;
+
+
+b,segement :段可以有表段、索引段、回滚段、临时段和高速缓存段等。
+
+c,extents :当一段中间所有空间已完全使用，oracle 为该段分配一个新的范围。
+
+d,data block :当用户从表中选择数据时，选择操作从数据库文件中以块为单位读取或者提取数据。例如 Oracle 块的大小为 8kb，即使只想检索4kb的大小的数据，也必须读取整个8kb的数据块
+
+查询当前设置的数据块 大小
+show parameter db_block_size;
+
+
+
+
+
+
+
+
