@@ -95,3 +95,11 @@ export CLASSPATH=./JAVA_HOME/lib;$JAVA_HOME/jre/lib
 注：修改文件后要想马上生效还要运行$ source /home/guok/.bash_profile不然只能在下次重进此用户时生效。
 3) 直接运行export命令定义变量【只对当前shell(BASH)有效(临时的)】
 在shell的命令行下直接使用[export变量名=变量值]定义变量，该变量只在当前的shell(BASH)或其子shell(BASH)下是有效的，shell关闭了，变量也就失效了，再打开新shell时就没有这个变量，需要使用的话还需要重新定义。
+
+===========================linux 防火墙 端口设置================
+1、firewall-cmd --zone=public --add-port=80/tcp --permanent  永久增加开放端口
+
+2、firewall-cmd  --reload 重启防火墙
+
+3、 firewall-cmd --list-port 查看所有开放端口
+
