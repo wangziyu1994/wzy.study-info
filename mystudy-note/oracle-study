@@ -1,7 +1,13 @@
 1, oracle 登录
 sqlplus 
-sys as sysdba
+a,sys as sysdba
 enter按键
+b,oracle 12c引入 cdb  pdb 的概念 ; 多个pdb 可插入 断开与cdb容器
+show con_name; 显示当前数据库名称.
+select con_id, dbid, guid, name , open_mode from v$pdbs;显示 cdb中所有pdb的相关信息.
+
+
+
 2,oracle 事务
 a,提交事务
 commit work[可选]  comment [提交的注释内容]  write/nowait  immediate/batch  force [设置强制提交的事务id]  
