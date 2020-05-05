@@ -51,5 +51,17 @@ b,channel 渠道
 
 c,routekey 路由键
 
-d,exchanges  交换器
+d,exchanges  交换器:通过交换器选择不同的路由键，匹配到相应的队列.
+
+8,交换消息流
+
+a,direct 
+
+b,topic
+
+c,fanout
+
+
+
+
 
