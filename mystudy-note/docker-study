@@ -1,27 +1,39 @@
-Docker Hub docker³£ÓÃdocker¾µÏñ¹Ù·½²Ö¿â
+Docker Hub dockerå¸¸ç”¨dockeré•œåƒå®˜æ–¹ä»“åº“
 
 
-docker  image ls ÁĞ¾ÙÈİÆ÷ËùÓĞdoceker¾µÏñÎÄ¼ş
+docker  image ls åˆ—ä¸¾å®¹å™¨æ‰€æœ‰docekeré•œåƒæ–‡ä»¶
 
-docker image pull   [docker×é]/[docker¾µÏñÎÄ¼şÃû]  ´ÓÍøÉÏÀ­È¥Ö¸¶¨¾µÏñÃû
+docker image pull   [dockerç»„]/[dockeré•œåƒæ–‡ä»¶å]  ä»ç½‘ä¸Šæ‹‰å»æŒ‡å®šé•œåƒå
 
-docker container run [docker¾µÏñÎÄ¼şÃû] 
+docker run [é•œåƒå] [è¿è¡Œé•œåƒåæ‰§è¡Œçš„å‘½ä»¤]
 
-docker container start [dockerÈİÆ÷ID] ¿ªÆôÒÑ¾­Í£Ö¹µÄÈİÆ÷
+docker logs -f [å®¹å™¨å] æŸ¥çœ‹è¿›ç¨‹çš„æ ‡å‡†è¾“å‡º
 
-docker container stop [dockerÈİÆ÷ID]  ¹Ø±ÕÕıÔÚÔËĞĞµÄÈİÆ÷ ÈİÆ÷×ÔĞĞÍ£Ö¹£¬»á±£´æÉĞÎ´½áÊøµÄ¹¤×÷
+docker ps åˆ—ä¸¾å®¹å™¨ç±»æ‰€æœ‰æ­£åœ¨è¿è¡Œçš„è¿›ç¨‹
 
-docker container kill [dockerÈİÆ÷ID] ¹Ø±ÕÕıÔÚÔËĞĞµÄÈİÆ÷ Ç¿ÖÆÈİÆ÷Í£Ö¹£¬²»»á»á±£´æÉĞÎ´½áÊøµÄ¹¤×÷
+docker run -d -p  [ä¸»æœºç«¯å£:å®¹å™¨è¿›ç¨‹ç«¯å£]
 
-docker container ls ÁĞ¾ÙËùÓĞÕıÔÚÔËĞĞµÄdocker ÈİÆ÷  -all°üÀ¨ÒÑ¾­Í£Ö¹µÄdocekerÈİÆ÷
+docker port [è¿›ç¨‹å] æŸ¥çœ‹å®¹å™¨è¿›ç¨‹ç«¯å£
 
-docker container rm [dockerÈİÆ÷ID] É¾³ı´ÅÅÌÉÏµÄdockerÈİÆ÷ÎÄ¼ş
 
-docker container logs ²é¿´ÈİÆ÷ÄÚ±ê×¼Êä³ö
 
-docker container exec ½øÈëÒ»¸öÕıÔÚÔËĞĞµÄÈİÆ÷
+docker container run [dockeré•œåƒæ–‡ä»¶å] 
 
-docker container cp [containID]:[/path/to/file] ´ÓÕıÔÚÔËĞĞµÄÈİÆ÷ÖĞ¸´ÖÆÎÄ¼şµ½±¾»ú
+docker container start [dockerå®¹å™¨ID] å¼€å¯å·²ç»åœæ­¢çš„å®¹å™¨
+
+docker container stop [dockerå®¹å™¨ID] å…³é—­æ­£åœ¨è¿è¡Œçš„å®¹å™¨ å®¹å™¨è‡ªè¡Œåœæ­¢ï¼Œä¼šä¿å­˜å°šæœªç»“æŸçš„å·¥ä½œ
+
+docker container kill [dockerå®¹å™¨ID] å…³é—­æ­£åœ¨è¿è¡Œçš„å®¹å™¨ å¼ºåˆ¶å®¹å™¨åœæ­¢ï¼Œä¸ä¼šä¼šä¿å­˜å°šæœªç»“æŸçš„å·¥ä½œ
+
+docker container ls åˆ—ä¸¾æ‰€æœ‰æ­£åœ¨è¿è¡Œçš„docker å®¹å™¨  -allåŒ…æ‹¬å·²ç»åœæ­¢çš„docekerå®¹å™¨
+
+docker container rm [dockerå®¹å™¨ID] åˆ é™¤ç£ç›˜ä¸Šçš„dockerå®¹å™¨æ–‡ä»¶
+
+docker container logs æŸ¥çœ‹å®¹å™¨å†…æ ‡å‡†è¾“å‡º
+
+docker container exec è¿›å…¥ä¸€ä¸ªæ­£åœ¨è¿è¡Œçš„å®¹å™¨
+
+docker container cp [containID]:[/path/to/file] ä»æ­£åœ¨è¿è¡Œçš„å®¹å™¨ä¸­å¤åˆ¶æ–‡ä»¶åˆ°æœ¬æœº
 
 
 
