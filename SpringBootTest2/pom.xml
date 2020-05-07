@@ -1,0 +1,37 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.wang</groupId>
+  <artifactId>SpringBootTest2</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+
+  
+    <parent>
+   <groupId>com.wang</groupId>
+  <artifactId>SpringBootTest</artifactId>
+   <version>0.0.1-SNAPSHOT</version>
+    <relativePath>../SpringBootTest/pom.xml</relativePath>
+    </parent>
+    
+	<dependencies>
+	<!-- 导入spring-boot的web支持 -->
+  <dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+		
+		  <dependency>
+			<groupId>com.wang</groupId>
+			 <artifactId>SpringBootTest1</artifactId>
+             <version>0.0.1-SNAPSHOT</version>
+		</dependency>
+		
+			<dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-eureka</artifactId>
+        </dependency>
+</dependencies>
+
+
+	
+
+</project>

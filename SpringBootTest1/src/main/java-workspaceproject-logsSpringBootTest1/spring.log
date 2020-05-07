@@ -1,0 +1,102 @@
+2019-11-18 10:02:11.215  INFO 6072 --- [main] com.wang.SbApp                           : No active profile set, falling back to default profiles: default
+2019-11-18 10:02:11.246  INFO 6072 --- [main] ationConfigEmbeddedWebApplicationContext : Refreshing org.springframework.boot.context.embedded.AnnotationConfigEmbeddedWebApplicationContext@ca30bc1: startup date [Mon Nov 18 10:02:11 CST 2019]; parent: org.springframework.context.annotation.AnnotationConfigApplicationContext@1fe20588
+2019-11-18 10:02:11.954  INFO 6072 --- [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=106875d5-f44e-3387-8b20-38c717489b71
+2019-11-18 10:02:11.976  INFO 6072 --- [main] f.a.AutowiredAnnotationBeanPostProcessor : JSR-330 'javax.inject.Inject' annotation found and supported for autowiring
+2019-11-18 10:02:12.043  INFO 6072 --- [main] trationDelegate$BeanPostProcessorChecker : Bean 'org.springframework.cloud.autoconfigure.ConfigurationPropertiesRebinderAutoConfiguration' of type [org.springframework.cloud.autoconfigure.ConfigurationPropertiesRebinderAutoConfiguration$$EnhancerBySpringCGLIB$$d995e383] is not eligible for getting processed by all BeanPostProcessors (for example: not eligible for auto-proxying)
+2019-11-18 10:02:12.549  INFO 6072 --- [main] s.b.c.e.t.TomcatEmbeddedServletContainer : Tomcat initialized with port(s): 8081 (http)
+2019-11-18 10:02:12.573  INFO 6072 --- [main] o.apache.catalina.core.StandardService   : Starting service Tomcat
+2019-11-18 10:02:12.575  INFO 6072 --- [main] org.apache.catalina.core.StandardEngine  : Starting Servlet Engine: Apache Tomcat/8.5.11
+2019-11-18 10:02:12.817  INFO 6072 --- [localhost-startStop-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2019-11-18 10:02:12.817  INFO 6072 --- [localhost-startStop-1] o.s.web.context.ContextLoader            : Root WebApplicationContext: initialization completed in 1571 ms
+2019-11-18 10:02:12.984  INFO 6072 --- [localhost-startStop-1] o.s.b.w.servlet.ServletRegistrationBean  : Mapping servlet: 'dispatcherServlet' to [/]
+2019-11-18 10:02:12.990  INFO 6072 --- [localhost-startStop-1] o.s.b.w.servlet.FilterRegistrationBean   : Mapping filter: 'characterEncodingFilter' to: [/*]
+2019-11-18 10:02:12.991  INFO 6072 --- [localhost-startStop-1] o.s.b.w.servlet.FilterRegistrationBean   : Mapping filter: 'hiddenHttpMethodFilter' to: [/*]
+2019-11-18 10:02:12.993  INFO 6072 --- [localhost-startStop-1] o.s.b.w.servlet.FilterRegistrationBean   : Mapping filter: 'httpPutFormContentFilter' to: [/*]
+2019-11-18 10:02:12.993  INFO 6072 --- [localhost-startStop-1] o.s.b.w.servlet.FilterRegistrationBean   : Mapping filter: 'requestContextFilter' to: [/*]
+2019-11-18 10:02:13.853  INFO 6072 --- [main] s.w.s.m.m.a.RequestMappingHandlerAdapter : Looking for @ControllerAdvice: org.springframework.boot.context.embedded.AnnotationConfigEmbeddedWebApplicationContext@ca30bc1: startup date [Mon Nov 18 10:02:11 CST 2019]; parent: org.springframework.context.annotation.AnnotationConfigApplicationContext@1fe20588
+2019-11-18 10:02:13.947  INFO 6072 --- [main] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped "{[/sayhello]}" onto public java.lang.String HelloController.sayHello(java.lang.String)
+2019-11-18 10:02:13.953  INFO 6072 --- [main] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped "{[/error]}" onto public org.springframework.http.ResponseEntity<java.util.Map<java.lang.String, java.lang.Object>> org.springframework.boot.autoconfigure.web.BasicErrorController.error(javax.servlet.http.HttpServletRequest)
+2019-11-18 10:02:13.955  INFO 6072 --- [main] s.w.s.m.m.a.RequestMappingHandlerMapping : Mapped "{[/error],produces=[text/html]}" onto public org.springframework.web.servlet.ModelAndView org.springframework.boot.autoconfigure.web.BasicErrorController.errorHtml(javax.servlet.http.HttpServletRequest,javax.servlet.http.HttpServletResponse)
+2019-11-18 10:02:14.023  INFO 6072 --- [main] o.s.w.s.handler.SimpleUrlHandlerMapping  : Mapped URL path [/webjars/**] onto handler of type [class org.springframework.web.servlet.resource.ResourceHttpRequestHandler]
+2019-11-18 10:02:14.024  INFO 6072 --- [main] o.s.w.s.handler.SimpleUrlHandlerMapping  : Mapped URL path [/**] onto handler of type [class org.springframework.web.servlet.resource.ResourceHttpRequestHandler]
+2019-11-18 10:02:14.095  INFO 6072 --- [main] o.s.w.s.handler.SimpleUrlHandlerMapping  : Mapped URL path [/**/favicon.ico] onto handler of type [class org.springframework.web.servlet.resource.ResourceHttpRequestHandler]
+2019-11-18 10:02:14.587  WARN 6072 --- [main] c.n.c.sources.URLConfigurationSource     : No URLs will be polled as dynamic configuration sources.
+2019-11-18 10:02:14.587  INFO 6072 --- [main] c.n.c.sources.URLConfigurationSource     : To enable URLs as dynamic configuration sources, define System property archaius.configurationSource.additionalUrls or make config.properties available on classpath.
+2019-11-18 10:02:14.596  WARN 6072 --- [main] c.n.c.sources.URLConfigurationSource     : No URLs will be polled as dynamic configuration sources.
+2019-11-18 10:02:14.597  INFO 6072 --- [main] c.n.c.sources.URLConfigurationSource     : To enable URLs as dynamic configuration sources, define System property archaius.configurationSource.additionalUrls or make config.properties available on classpath.
+2019-11-18 10:02:14.687  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Registering beans for JMX exposure on startup
+2019-11-18 10:02:14.706  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'environmentManager' has been autodetected for JMX exposure
+2019-11-18 10:02:14.708  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'configurationPropertiesRebinder' has been autodetected for JMX exposure
+2019-11-18 10:02:14.715  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Bean with name 'refreshScope' has been autodetected for JMX exposure
+2019-11-18 10:02:14.719  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Located managed bean 'environmentManager': registering with JMX server as MBean [org.springframework.cloud.context.environment:name=environmentManager,type=EnvironmentManager]
+2019-11-18 10:02:14.740  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Located managed bean 'refreshScope': registering with JMX server as MBean [org.springframework.cloud.context.scope.refresh:name=refreshScope,type=RefreshScope]
+2019-11-18 10:02:14.755  INFO 6072 --- [main] o.s.j.e.a.AnnotationMBeanExporter        : Located managed bean 'configurationPropertiesRebinder': registering with JMX server as MBean [org.springframework.cloud.context.properties:name=configurationPropertiesRebinder,context=ca30bc1,type=ConfigurationPropertiesRebinder]
+2019-11-18 10:02:14.919  INFO 6072 --- [main] o.s.c.support.DefaultLifecycleProcessor  : Starting beans in phase 0
+2019-11-18 10:02:14.933  INFO 6072 --- [main] o.s.c.n.eureka.InstanceInfoFactory       : Setting initial instance status as: STARTING
+2019-11-18 10:02:15.791  INFO 6072 --- [main] c.n.d.provider.DiscoveryJerseyProvider   : Using JSON encoding codec LegacyJacksonJson
+2019-11-18 10:02:15.794  INFO 6072 --- [main] c.n.d.provider.DiscoveryJerseyProvider   : Using JSON decoding codec LegacyJacksonJson
+2019-11-18 10:02:15.992  INFO 6072 --- [main] c.n.d.provider.DiscoveryJerseyProvider   : Using XML encoding codec XStreamXml
+2019-11-18 10:02:15.992  INFO 6072 --- [main] c.n.d.provider.DiscoveryJerseyProvider   : Using XML decoding codec XStreamXml
+2019-11-18 10:02:16.308  INFO 6072 --- [main] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:02:16.487  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Disable delta property : false
+2019-11-18 10:02:16.487  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Single vip registry refresh property : null
+2019-11-18 10:02:16.487  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Force full registry fetch : false
+2019-11-18 10:02:16.487  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Application is null : false
+2019-11-18 10:02:16.488  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Registered Applications size is zero : true
+2019-11-18 10:02:16.488  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Application version is -1: true
+2019-11-18 10:02:16.488  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Getting all instance registry info from the eureka server
+2019-11-18 10:02:16.753  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : The response status is 200
+2019-11-18 10:02:16.756  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Starting heartbeat executor: renew interval is: 30
+2019-11-18 10:02:16.759  INFO 6072 --- [main] c.n.discovery.InstanceInfoReplicator     : InstanceInfoReplicator onDemand update allowed rate per min is 4
+2019-11-18 10:02:16.763  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Discovery Client initialized at timestamp 1574042536763 with initial instances count: 2
+2019-11-18 10:02:16.800  INFO 6072 --- [main] c.n.e.EurekaDiscoveryClientConfiguration : Registering application helloController with eureka with status UP
+2019-11-18 10:02:16.800  INFO 6072 --- [main] com.netflix.discovery.DiscoveryClient    : Saw local status change event StatusChangeEvent [timestamp=1574042536800, current=UP, previous=STARTING]
+2019-11-18 10:02:16.804  INFO 6072 --- [DiscoveryClient-InstanceInfoReplicator-0] com.netflix.discovery.DiscoveryClient    : DiscoveryClient_HELLOCONTROLLER/192.168.133.1:helloController:8081: registering service...
+2019-11-18 10:02:16.899  INFO 6072 --- [DiscoveryClient-InstanceInfoReplicator-0] com.netflix.discovery.DiscoveryClient    : DiscoveryClient_HELLOCONTROLLER/192.168.133.1:helloController:8081 - registration status: 204
+2019-11-18 10:02:16.899  INFO 6072 --- [main] s.b.c.e.t.TomcatEmbeddedServletContainer : Tomcat started on port(s): 8081 (http)
+2019-11-18 10:02:16.901  INFO 6072 --- [main] c.n.e.EurekaDiscoveryClientConfiguration : Updating port to 8081
+2019-11-18 10:02:16.905  INFO 6072 --- [main] com.wang.SbApp                           : Started SbApp in 7.666 seconds (JVM running for 8.14)
+2019-11-18 10:02:23.597  INFO 6072 --- [http-nio-8081-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring FrameworkServlet 'dispatcherServlet'
+2019-11-18 10:02:23.597  INFO 6072 --- [http-nio-8081-exec-1] o.s.web.servlet.DispatcherServlet        : FrameworkServlet 'dispatcherServlet': initialization started
+2019-11-18 10:02:23.617  INFO 6072 --- [http-nio-8081-exec-1] o.s.web.servlet.DispatcherServlet        : FrameworkServlet 'dispatcherServlet': initialization completed in 19 ms
+2019-11-18 10:02:23.668 ERROR 6072 --- [http-nio-8081-exec-1] HelloController.class                    : 日志记录算术异常
+2019-11-18 10:02:23.668  INFO 6072 --- [http-nio-8081-exec-1] HelloController.class                    : debug日志记录开始
+2019-11-18 10:02:23.668  WARN 6072 --- [http-nio-8081-exec-1] HelloController.class                    : warn日志记录开始
+2019-11-18 10:02:23.668 ERROR 6072 --- [http-nio-8081-exec-1] HelloController.class                    : error日志记录开始
+2019-11-18 10:07:16.512  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:12:16.535  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:17:16.556  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:22:16.577  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:27:16.599  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:32:16.617  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:37:16.639  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:42:16.661  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:47:16.683  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:52:16.705  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 10:57:16.728  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:02:16.748  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:07:16.770  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:12:16.792  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:17:16.815  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:22:16.837  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:27:16.864  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:32:16.883  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:37:16.914  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:42:16.937  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 11:47:16.959  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 12:39:01.543  INFO 6072 --- [DiscoveryClient-CacheRefreshExecutor-0] o.a.http.impl.client.DefaultHttpClient   : I/O exception (org.apache.http.NoHttpResponseException) caught when processing request to {}->http://localhost:8000: The target server failed to respond
+2019-11-18 12:39:01.544  INFO 6072 --- [DiscoveryClient-CacheRefreshExecutor-0] o.a.http.impl.client.DefaultHttpClient   : Retrying request to {}->http://localhost:8000
+2019-11-18 12:39:01.579  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 12:44:01.604  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 12:49:01.629  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 12:54:01.653  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 12:59:01.680  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:04:01.702  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:09:01.722  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:14:01.745  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:19:01.766  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:24:01.789  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:29:01.817  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:34:01.841  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:39:01.860  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
+2019-11-18 13:44:01.881  INFO 6072 --- [AsyncResolver-bootstrap-executor-0] c.n.d.s.r.aws.ConfigClusterResolver      : Resolving eureka endpoints via configuration
