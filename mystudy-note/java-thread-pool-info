@@ -1,0 +1,54 @@
+java线程池
+使用 Executors中的静态方法即可创造thread pool 主要有以下三种：
+方法名	功能
+newFixedThreadPool(int nThreads)	创建固定大小的线程池
+newSingleThreadExecutor()	创建只有一个线程的线程池
+newCachedThreadPool()	创建一个不限线程数上限的线程池，任何提交的任务都将立即执行
+
+小程序使用这些快捷方法没什么问题，对于服务端需要长期运行的程序，创建线程池应该直接使用ThreadPoolExecutor的构造方法.
+
+  构造方法参数详解:
+  
+  int corePoolSize, // 线程池长期维持的线程数，即使线程处于Idle状态，也不会回收。
+  int maximumPoolSize, // 线程数的上限
+  long keepAliveTime, TimeUnit unit, // 超过corePoolSize的线程的idle时长，
+                                     // 超过这个时间，多余的线程会被回收。
+  BlockingQueue<Runnable> workQueue, // 任务的排队队列
+  ThreadFactory threadFactory, // 新线程的产生方式
+  RejectedExecutionHandler handler) // 拒绝策略
+
+注意：
+corePoolSize和maximumPoolSize设置不当会影响效率，甚至耗尽线程；
+workQueue设置不当容易导致OOM；
+handler设置不当会导致提交任务时抛出异常。
+
+线程池的工作顺序：
+corePoolSize -> 任务队列 -> maximumPoolSize -> 拒绝策略
+
+线程池三种提交任务的方式：
+提交方式	是否关心返回结果
+Future<T> submit(Callable<T> task)	是
+void execute(Runnable command)	否
+Future<?> submit(Runnable task)	否，虽然返回Future，但是其get()方法总是返回null
+
+
+线程池的拒绝策略
+
+拒绝策略	拒绝行为
+AbortPolicy	抛出RejectedExecutionException
+DiscardPolicy	什么也不做，直接忽略
+DiscardOldestPolicy	丢弃执行队列中最老的任务，尝试为当前提交的任务腾出位置
+CallerRunsPolicy	直接由提交任务者执行这个任务
+
+
+// Java线程池的完整构造函数
+public ThreadPoolExecutor(
+  int corePoolSize, // 正式工数量
+  int maximumPoolSize, // 工人数量上限，包括正式工和临时工
+  long keepAliveTime, TimeUnit unit, // 临时工游手好闲的最长时间，超过这个时间将被解雇
+  BlockingQueue<Runnable> workQueue, // 排期队列
+  ThreadFactory threadFactory, // 招人渠道
+  RejectedExecutionHandler handler) // 拒单方式
+
+
+
