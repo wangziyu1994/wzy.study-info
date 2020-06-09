@@ -1,0 +1,56 @@
+web工程中classpath:
+WEB-INF/classes路径
+classpath*:可以找该路径下多个文件
+classpath:**表示匹配该路径下任意目录
+=======================================================
+	
+springboot This application has no explicit mapping for /error, so you are seeing this as a fallback 网页访问报错
+
+Application启动类的位置不对：要将Application类放在最外侧，即包含所有子包 ，spring-boot会自动加载启动类所在包下及其子包下的所有组件。
+
+========================================================
+spring boot  设置日志
+核心配置文件中设置 
+logging.level.日志监控类的包名加类名
+logging.path=日志的存放文件路径
+
+logging.pattern.console 设置在控制台输出的日志格式
+logging.pattern.file 设置输出在文件的日志格式       
+规则：
+%d{yyyy-mm-dd}  
+%thread  
+%-5level  向左对齐5个字符   
+%n换行   
+%msg日志消息 
+%logger{30}日志输出者的名字 输出30个字符日志消息
+自定义日志配置
+appender下三种日志2种滚动策略  TimeBasedRollingPolicy||SizeAndTimeBasedRollingPolicy
+<appender>
+<file></file>设置当前活动日志文件的路径以及文件名
+<rollPolicy  class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+<FileNamePattern></FileNamePattern>设置归档日志文件路径以及文件名，若无file则活动日志文件名默认采用归档日志文件路径及格式  %d{YYYY-MM-DD-HH-mm-ss}
+<totalSizeCap></totalSizeCap>日志文件总大小
+<maxHistory></maxHistory>日志最长保留有效期
+<!-- 触发器配置了日志文件不能超过10M(默认)，若超过10M，则归档日志文件会以索引0开始， -->
+<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+<maxFileSize>10MB</maxFileSize>
+</timeBasedFileNamingAndTriggeringPolicy>
+</rollPolicy>
+</appender>
+
+<appender>
+<file></file>设置当前活动日志文件的路径以及文件名
+<rollPolicy  class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+<FileNamePattern></FileNamePattern>设置归档日志文件路径以及文件名，若无file则活动日志文件名默认采用归档日志文件路径及格式  %d{YYYY-MM-DD-HH-mm}
+<totalSizeCap></totalSizeCap>日志文件总大小
+<maxHistory></maxHistory>日志最长保留有效期
+<maxFileSize></maxFileSize>活动日志文件最大大小
+</rollPolicy>
+</appender>
+===============================================================
+
+
+
+
+
+

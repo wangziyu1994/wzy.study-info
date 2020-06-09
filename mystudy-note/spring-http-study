@@ -1,0 +1,27 @@
+@ResponseBody
+1.作用在方法上的，一般在异步请求获取数据时使用；
+2.作用是将方法的返回值以特定格式（JSON数据/XML）写入HTTP response body 中，从而将数据返还给客户端。这种格式的转换是由HttpMessageConverter接口中的方法来实现：如果是bean对象，会调用对象的getXXX（）方法获取属性值并且以键值对的形式进行封装，进而转化为json串。如果是map集合，采用get(key)方式获取value值，然后进行封装。
+3.方法上有无@ResponseBody的区别：
+未使用该注解，底层会将方法的返回值封装为ModelAndView对象 ； 在使用此注解之后不会再走视图处理器，而是直接将数据写入到输入流中，他的效果等同于通过response对象输出指定格式的数据
+　　@RequestMapping("/login")
+　　@ResponseBody
+　　public User login(User user){
+　　　　return user;
+　　}
+　　User字段：userName password
+　　那么在前台接收到的数据为：’{“userName”:“xxx”,“password”:“xxx”}’
+　　----------------------------------------------------------------------------------
+
+效果等同于如下代码：
+　　@RequestMapping("/login")
+　　public void login(User user, HttpServletResponse response){
+　　　　response.getWriter.write(JSONObject.fromObject(user).toString());
+　　}
+
+@RequestMapping（“url”）
+中文解释：请求（地址）映射
+1.作用在Controller类或其方法上，一般都是写在方法上，表示该方法的对应的前台请求路径
+
+@RequestBody
+中文解释：请求体
+1.作用在形参列表上，将前台发送过来的（json/xml）数据 封装成javabean对象（：封装时使用到的一个对象是系统默认配置的 HttpMessageConverter进行解析，然后封装到形参上）
