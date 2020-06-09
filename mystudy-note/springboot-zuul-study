@@ -1,0 +1,66 @@
+Zuul 是 Netflix 开源的微服务网关，Spring Cloud 对 Zuul 进行了整合和增强。在 SpringCloud 体系中，Zuul 担任着网关的角色，对发送到服务端的请求进行一些预处理，比如安全验证、动态路由、负载分配等。
+
+Zuul 的核心是 Filters，根据执行时期分为以下几类：
+PRE：这种过滤器在请求被路由之前调用
+ROUTING：这种过滤器将请求路由到微服务
+POST：这种过滤器在路由到微服务以后执行
+ERROR：在其他阶段发生错误时执行该过滤器
+
+下面对于配置进行说明：
+
+pom的配置：
+
+<dependency>
+	<groupId>org.springframework.cloud</groupId>
+		<artifactId>spring-cloud-starter-zuul</artifactId>
+		</dependency>
+
+		由于还没有使用eureka，所以只引入zuul的集成包就可以。版本由 spring-boot-starter-parent自动管理。
+
+		启动类添加 @EnableZuulProxy 注解：
+
+		@SpringBootApplication
+		@EnableZuulProxy
+		public class MainWebApplication {
+		    private static Logger logger=LoggerFactory.getLogger(MainWebApplication.class);
+		    	public static void main(String[] args) {
+					SpringApplication.run(MainWebApplication.class, args);
+							logger.info("***>>>>>>>Server startup>>>");
+								}
+								}
+
+application.properties的配置：
+#服务器不用注册到其他服务器
+eureka.client.registerWithEureka=false
+#服务器不用去服务器抓取注册信息
+eureka.client.fetchRegistry=false
+application-cloudConfig.properties 配置：
+#本地环境配置zuul转发的规则：
+spring.application.name=acs-msettle-gateway
+zuul.routes.acs-deposit.path=/acsDeposit/**
+zuul.routes.acs-deposit.url=http://127.0.0.1:8260/
+zuul 转发 有两种配置：
+1、根据 eureka server 的serviceId 转发：
+zuul.routes.serviceName.path=/exampleService/**
+zuul.routes.serviceName.serviceId=serviceId
+1
+2
+注：
+zuul.routes 是固定的
+serviceName 是可以随便写的，但最好根据要路由的服务取
+serviceId 是 eureka 服务注册时的名称
+exampleService 是前端请求某个微服务的一个公共的路径名，如下面的acsDeposit
+//根据Id查询
+url1 = "${basePath}/acsDeposit/propConfig/getPropConfigById?param=" + param;  
+//新增配置
+url2 = "${basePath}/acsDeposit/propConfigSub/addProportionConfig.do";
+而微服务在 Controller层的 RequestMapping 注解中可以不包含acsDeposit
+2、根据具体 URL 转发：
+zuul.routes.serviceName.path=/exampleService/**
+zuul.routes.serviceName.url=http://127.0.0.1:8260/
+1
+2
+上述参数与1的取名规则相同，不再解释。
+项目当前由于尚未使用eureka，所以采用了第二种转发规则。这种转发有很多好处，最大的好处就是不用再写一大堆的dubbo接口了，项目的页面都放在一个服务上，
+在使用 Zuul 之前，所有的交互都要写成dubbo接口，使用Zuul可以直接HTTP调用，方便很多。
+
