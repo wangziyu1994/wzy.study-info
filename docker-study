@@ -1,21 +1,34 @@
 Docker Hub docker常用docker镜像官方仓库
 
+service docker start 启动docker服务
+
+---------------------------------------[docker有关镜像的命令]----------------------------------------------------------------------
 
 docker  image ls 列举容器所有doceker镜像文件
 
 docker image pull   [docker组]/[docker镜像文件名]  从网上拉去指定镜像名
 
+---------------------------------------[docker查看内部进程有关的命令]----------------------------------------------------------------------
+
 docker run [镜像名] [运行镜像后执行的命令]
+
+docker run -t -i  [镜像名]
+
+-t:在新容器内指定一个伪终端或终端。
+
+-i:允许你对容器内的标准输入 (STDIN) 进行交互。
 
 docker logs -f [容器名] 查看进程的标准输出
 
 docker ps 列举容器类所有正在运行的进程
 
-docker run -d -p  [主机端口:容器进程端口]
+docker run -d -p  [主机端口:映射容器进程端口]
 
 docker port [进程名] 查看容器进程端口
 
+docker rm 来一出不需要的容器
 
+---------------------------------------[docker有关运行容器的命令]----------------------------------------------------------------------
 
 docker container run [docker镜像文件名] 
 
@@ -34,6 +47,10 @@ docker container logs 查看容器内标准输出
 docker container exec 进入一个正在运行的容器
 
 docker container cp [containID]:[/path/to/file] 从正在运行的容器中复制文件到本机
+
+docker top [容器] 列举容器内部进程
+
+docker attach [容器ID]进入正在运行的容器
 
 
 
