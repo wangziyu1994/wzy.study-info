@@ -1,0 +1,68 @@
+filebeat的配置文件在安装目录下，filebeat.yml文件
+
+paths：指定要监控的日志，目前按照Go语言的glob函数处理。没有对配置目录做递归处理，比如配置的如果是：
+      /var/log/* /*.log
+则只会去/var/log目录的所有子目录中寻找以”.log”结尾的文件，而不会寻找/var/log目录下以”.log”结尾的文件。
+
+encoding：指定被监控的文件的编码类型，使用plain和utf-8都是可以处理中文日志的。
+
+input_type：指定文件的输入类型log(默认)或者stdin。
+
+exclude_lines：在输入中排除符合正则表达式列表的那些行。
+
+include_lines：包含输入中符合正则表达式列表的那些行（默认包含所有行），include_lines执行完毕之后会执行exclude_lines。
+
+exclude_files：忽略掉符合正则表达式列表的文件（默认为每一个符合paths定义的文件都创建一个harvester）。
+
+fields：向输出的每一条日志添加额外的信息，比如“level:debug”，方便后续对日志进行分组统计。默认情况下，会在输出信息的fields子目录下以指定的新增fields建立子目录，例如fields.level。
+
+fields_under_root：如果该选项设置为true，则新增fields成为顶级目录，而不是将其放在fields目录下。自定义的field会覆盖filebeat默认的field。
+
+scan_frequency：Filebeat以多快的频率去prospector指定的目录下面检测文件更新（比如是否有新增文件），如果设置为0s，则Filebeat会尽可能快地感知更新（占用的CPU会变高）。默认是10s。
+
+harvester_buffer_size：每个harvester监控文件时，使用的buffer的大小。默认是16384.
+
+max_bytes：日志文件中增加一行算一个日志事件，max_bytes限制在一次日志事件中最多上传的字节数，多出的字节会被丢弃。默认是10M
+
+backoff：Filebeat检测到某个文件到了EOF之后，每次等待多久再去检测文件是否有更新，默认为1s
+
+max_backoff：Filebeat检测到某个文件到了EOF之后，等待检测文件更新的最大时间，默认是10秒。
+
+multiline：适用于日志中每一条日志占据多行的情况，比如各种语言的报错信息调用栈。这个配置的下面包含如下配置：
+pattern：多行日志开始的那一行匹配的pattern
+negate：是否需要对pattern条件转置使用，不翻转设为true，反转设置为false
+match：匹配pattern后，与前面（before）还是后面（after）的内容合并为一条日志
+max_lines：合并的最多行数（包含匹配pattern的那一行）
+timeout：到了timeout之后，即使没有匹配一个新的pattern（发生一个新的事件），也把已经匹配的日志事件发送出去
+
+
+tail_files：如果设置为true，Filebeat从文件尾开始监控文件新增内容，把新增的每一行文件作为一个事件依次发送，而不是从文件开始处重新发送所有内容。
+【如果此选项设置为true，则Filebeat将开始在每个文件的末尾而不是开头读取新文件。 当此选项与日志轮换结合使用时，可能会跳过新文件中的第一个日志条目。 默认设置为false。
+此选项适用于Filebeat尚未处理的文件。 如果您之前运行过Filebeat并且文件的状态已经保留，则tail_files将不会应用。要将tail_files应用于所有文件，必须停止Filebeat并删除注册表文件。 请注意，这样做会删除以前的所有状态。】
+
+
+ignore_older：可以指定Filebeat忽略指定时间段以外修改的日志内容，比如2h（两个小时）或者5m(5分钟)。
+【如果启用此选项，Filebeat将忽略在指定的时间跨度之前修改的所有文件。 如果长时间保留日志文件，配置ignore_older会特别有用。 例如，如果要启动Filebeat，但只想发送上周的文件和最新的文件，则可以配置此选项。 您可以使用时间字符串，如2小时（2小时）和5米（5分钟）。 默认值为0，禁用该设置。 注释掉配置与将其设置为0具有相同的效果。
+注意：这个ignore_older是针对文件，如果文件最近一次的更新时间超过设定的时间，启动filebeat的时候，就不会去读那个文件，不过如果启动后那个文件又有更新，就会采集更新之后的部分，主要适用用监控一个目录下多个文件的时候】
+
+close_inactive：如果一个文件在某个时间段内没有发生过更新，则关闭监控的文件handle。默认5m。
+【启用此选项后，如果文件尚未在指定的持续时间内收获，则Filebeat将关闭文件句柄。定义期间的计数器从harvester读取最后一条日志行开始。它不是基于文件的修改时间。如果关闭的文件再次更改，则会启动新的收集器，并在scan_frequency过去后拾取最新的更改。
+建议将close_inactive设置为大于对日志文件的最不频繁更新的值。例如，如果您的日志文件每隔几秒更新一次，则可以安全地将close_inactive设置为1m。如果存在具有非常不同更新速率的日志文件，则可以使用具有不同值的多个配置。】
+
+close_renamed ：启用此选项后，Filebeat会在重命名文件时关闭文件处理程序。 例如，在rotating文件时会发生这种情况。 默认情况下，收集器保持打开状态并继续读取文件，因为文件处理程序不依赖于文件名。 如果启用了close_renamed选项并且文件被重命名或移动，使得它不再与为其指定的文件模式匹配，则不会再次拾取该文件。 Filebeat无法读取该文件。
+
+close_removed : 启用此选项后，Filebeat会在删除文件时关闭收集器。 通常，只有在close_inactive指定的持续时间内文件处于非活动状态后才能删除该文件。 但是，如果提前删除文件而您未启用close_removed，则Filebeat会保持文件打开以确保收集器已完成。 如果此设置导致文件由于过早从磁盘中删除而未完全读取，请禁用此选项。 默认情况下启用此选项， 如果禁用此选项，则还必须禁用clean_removed。
+
+close_timeout：启用此选项后，Filebeat会为每个收集器提供预定义的生命周期。无论读取到文件中的哪个位置，读取都将在close_timeout时间段过后停止。当您只想在文件上花费预定义的时间时，此选项对于较旧的日志文件非常有用。虽然close_timeout将在预定义超时后关闭文件，但如果文件仍在更新，Filebeat将根据定义的scan_frequency再次启动新的收集器。此收割机的close_timeout将再次以超时倒计时开始。
+如果输出被阻止，此选项特别有用，这使得Filebeat即使对于从磁盘中删除的文件也会保持打开文件处理程序。将close_timeout设置为5m可确保定期关闭文件，以便操作系统释放它们。
+如果将close_timeout设置为等于ignore_older，则在收割机关闭时修改文件将不会被拾取。这种设置组合通常会导致数据丢失，并且不会发送完整的文件。
+当您对包含多行事件的日志使用close_timeout时，收集器可能会在多行事件中停止，这意味着只会发送部分事件。如果再次启动收割机并且文件仍然存在，则仅发送事件的第二部分。
+默认情况下，此选项设置为0，表示已禁用此选项。
+
+clean_inactive ：启用此选项后，Filebeat会在指定的不活动时间段过后删除文件的状态。 如果文件已被Filebeat忽略（文件早于ignore_older），则只能删除状态。 clean_inactive设置必须大于ignore_older + scan_frequency，以确保在仍在收集文件时不删除任何状态。 否则，该设置可能导致Filebeat不断重新发送完整内容，因为clean_inactive会删除Filebeat仍检测到的文件的状态。 如果文件已更新或再次出现，则从头开始读取文件。
+clean_inactive配置选项对于减小注册表文件的大小很有用，尤其是在每天生成大量新文件的情况下。
+
+clean_removed ：启用此选项后，如果在最后一个已知名称下无法在磁盘上找到文件，则Filebeat会清除注册表中的文件。 这意味着在harvester完成后重命名的文件也将被删除。默认情况下启用此选项。
+如果共享驱动器短时间消失并再次出现，则将从头开始再次读取所有文件，因为状态已从注册表文件中删除。 在这种情况下，我们建议您禁用clean_removed选项；如果还禁用了close_removed，则必须禁用此选项。
+
+
