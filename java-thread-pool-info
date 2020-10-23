@@ -1,9 +1,18 @@
 java线程池
 使用 Executors中的静态方法即可创造thread pool 主要有以下三种：
 方法名	功能
-newFixedThreadPool(int nThreads)	创建固定大小的线程池
-newSingleThreadExecutor()	创建只有一个线程的线程池
-newCachedThreadPool()	创建一个不限线程数上限的线程池，任何提交的任务都将立即执行
+newFixedThreadPool(int nThreads)	
+创建固定大小的线程池
+创建一个定长线程池，可控制线程最大并发数，超出的线程会在队列中等待
+
+newSingleThreadExecutor()	
+创建只有一个线程的线程池
+
+
+newCachedThreadPool()	
+创建一个不限线程数上限的线程池，任何提交的任务都将立即执行
+创建一个可缓存线程池，如果线程池长度超过处理需要，可灵活回收空闲线程，若无可回收，则新建线程
+线程池为无限大，当执行第二个任务时第一个任务已经完成，会复用执行第一个任务的线程，而不用每次新建线程
 
 小程序使用这些快捷方法没什么问题，对于服务端需要长期运行的程序，创建线程池应该直接使用ThreadPoolExecutor的构造方法.
 

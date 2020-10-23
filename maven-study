@@ -26,3 +26,4 @@ system
 import
 这个是maven2.0.9版本后出的属性，import只能在dependencyManagement的中使用，能解决maven单继承问题，import依赖关系实际上并不参与限制依赖关系的传递性。
 
+7.dependcyManagment jar包依赖管理 如果父类项目在managment 里写了版本 那么子类则继承父类 无需再写，如果子类写了，则实际引用版本以子类为准.

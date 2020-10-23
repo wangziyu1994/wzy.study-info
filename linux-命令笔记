@@ -127,3 +127,10 @@ export CLASSPATH=./JAVA_HOME/lib;$JAVA_HOME/jre/lib
 
 3、 firewall-cmd --list-port 查看所有开放端口
 
+============================linux 查看系统配置======================
+uname -a
+============================linux 系统用户设置======================
+useradd -g 设置组 -d 设置目录 -s 设置运行shell 
+cat /etc/passwd 查看所有用户设置
+
+
