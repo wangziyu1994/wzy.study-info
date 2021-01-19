@@ -1,0 +1,8 @@
+如果是linux系统
+sudo npm install npm -g
+/usr/local/bin/npm -> /usr/local/lib/node_modules/npm/bin/npm-cli.js
+npm@2.14.2 /usr/local/lib/node_modules/npm
+
+如果是 Window 系统使用以下命令即可：
+
+npm install npm -g
