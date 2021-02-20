@@ -40,4 +40,4 @@ RetentionPolicy.RUNTIME:这种类型的Annotations将被JVM保留,所以他们�
 @Document：说明该注解将被包含在javadoc中
 @Inherited：说明子类可以继承父类中的该注解
 
-
+wangziyuaisaber
