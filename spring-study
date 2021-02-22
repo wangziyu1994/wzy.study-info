@@ -30,3 +30,41 @@ close
 
 2.4 close
 
+
+3,springBean 生命周期
+
+3.1 Bean元信息处理阶段
+3.1.1 Bean元信息解析阶段:xml文件 注解 通过相应的BeanDefinitionReader转化成BeanDefinition
+3.1.2 Bean注册阶段:将BeanDefinition保存至BeanDefinitionRegistry(典型实现DefaultListableBeanFactory)方便后续调用
+3.1.3 BeanDefintion的合并阶段:将GenericBeanDefinition转化成RootBeanDefintion(具有父类的属性)
+
+
+3.2 Bean实例化阶段
+3.2.1 Bean的Class加载阶段:resolveClass方法会将RootBeanDefinition里面记录的Bean信息加载成Class类保存至RootBeanDefintion里面
+3.2.2 Bean的实例化阶段:利用构造器创建Bean
+3.2.3 Bean的实例化前阶段:spring提供的Bean拓展方式
+3.2.4 Bean的实例化后阶段:spring提供的Bean拓展方式 
+3.2.5 Bean的赋值前阶段:?
+3.2.6 Bean的赋值阶段
+
+
+
+
+3.3 Bean初始化阶段:
+3.3.1 Bean的aware接口回调阶段
+3.3.2 Bean的初始化前阶段
+3.3.3 Bean的初始化阶段
+3.3.4 Bean的初始化后阶段
+
+
+
+
+3.4 Bean销毁阶段
+3.4.1 Bean的销毁前阶段
+3.4.2 Bean的销毁阶段
+
+
+3.5 Bean垃圾收集阶段
+spring会在上下文关闭后触发GC 触发spring Bean的垃圾收集
+
+
