@@ -9,6 +9,12 @@ springboot This application has no explicit mapping for /error, so you are seein
 Application启动类的位置不对：要将Application类放在最外侧，即包含所有子包 ，spring-boot会自动加载启动类所在包下及其子包下的所有组件。
 
 ========================================================
+spring boot 启动方式
+spring bean regitry之后才会 autoConfiguration 
+
+
+
+========================================================
 spring boot  设置日志
 核心配置文件中设置 
 logging.level.日志监控类的包名加类名

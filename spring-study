@@ -67,4 +67,27 @@ close
 3.5 Bean垃圾收集阶段
 spring会在上下文关闭后触发GC 触发spring Bean的垃圾收集
 
+4 spring的三级缓存
+4.1 singletonObjects  一级
+4.2 earlySingletonObjects 二级
+4.3 singletonFactories 三级
+
+一级缓存想要进入二级缓存的话，必须满足两个条件 1，一级缓存没有 2，对象正处于创建状态
+
+
+实例化A------>一到三级缓存检索A,未发现A开始创建A------------>将A转化成ObjectFactory并且放入singleFactories中去---------->初始化A过程中,发现RunBeanReference B，一到三级缓存中检索B,未发现B，开始创建B
+实例化B------------>将B转化成ObjectFactory并且放入singleFactories中去---------->初始化B过程中,发现RunBeanReference A,一到三级缓存中检索A，发现A，由三级缓存singletonFactories移动至二级缓存earlySingletonObjects
+初始化B完成,此时B中的属性A已被填充。
+一到三级缓存中检索B，发现三级缓存中的B，由三级缓存singletonFactories移动至二级缓存earlySingletonObjects当中
+将初始化后的B由二级缓存移动至一级缓存。
+初始化A完成,此时A中的属性B已被填充.
+将初始化后的A由二级缓存移动至一级缓存。
+
+
+
+
+
+
+
+
 
