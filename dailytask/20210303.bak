@@ -1,0 +1,7 @@
+1,spring源码
+a,aware接口
+b,FactoryBean接口
+
+2，springboot
+初始化器7个 全限定类名
+监听器11个  全限定类名

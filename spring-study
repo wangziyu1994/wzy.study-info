@@ -1,3 +1,15 @@
+
+1,Spring 在setConfigLocation() 中调用getEnvironment()的createEnvironment()方法创建了两个PropertySource对象 
+SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource（JAVA运行变量）可以通过VMOPTIONS -D来设置具体属性与值.
+另外还创建了PropertySourceResolver设置存储PropertySources 并且设置一些属性来方便解析
+2,initPropertySource()  来做自己的拓展  比如 setRequiredProeprty(属性值)  可以再后面的valiatedRequiredProperty检验。如果不存在就会抛出异常.
+3,初始化xmlDefinaitionReader  设置reader的 DTD方式解析器 BeansDtdResolver  XSD方式解析器 PluggableSchemaResolver meta/spring.schemas存有XSD的名字
+4,load 将XML转化为xmlBeanDefinaition
+5, String --------->String []----------------->Resource[]-------------------------->Resource  
+
+
+
+
 1,spring IOC
 xml配置,注解配置
 BeanFactory
@@ -75,18 +87,19 @@ spring会在上下文关闭后触发GC 触发spring Bean的垃圾收集
 一级缓存想要进入二级缓存的话，必须满足两个条件 1，一级缓存没有 2，对象正处于创建状态
 
 
-实例化A------>一到三级缓存检索A,未发现A开始创建A------------>将A转化成ObjectFactory并且放入singleFactories中去---------->初始化A过程中,发现RunBeanReference B，一到三级缓存中检索B,未发现B，开始创建B
-实例化B------------>将B转化成ObjectFactory并且放入singleFactories中去---------->初始化B过程中,发现RunBeanReference A,一到三级缓存中检索A，发现A，由三级缓存singletonFactories移动至二级缓存earlySingletonObjects
-初始化B完成,此时B中的属性A已被填充。
-一到三级缓存中检索B，发现三级缓存中的B，由三级缓存singletonFactories移动至二级缓存earlySingletonObjects当中
-将初始化后的B由二级缓存移动至一级缓存。
+实例化A------>一到三级缓存检索A,未发现A开始创建A------------>将A转化成ObjectFactory并且放入singleFactories中去
+初始化A过程中,发现RunBeanReference B，一到三级缓存中检索B,未发现B，开始创建B
+实例化B------------>将B转化成ObjectFactory并且放入singleFactories中去
+初始化B过程中,发现RunBeanReference A,一到三级缓存中检索A，发现singleObjectFactory中的beanName,执行ObjectFactory.getObject()方法即getEarlyReference(),如果是代理对象,完成代理对象的创建,由三级缓存singletonFactories移动至二级缓存earlySingletonObjects
+初始化B完成,此时B中的属性A已被填充。如果
+将初始化后的B由三级缓存移动至一级缓存。
 初始化A完成,此时A中的属性B已被填充.
 将初始化后的A由二级缓存移动至一级缓存。
 
 
 
 
-
+5,
 
 
 

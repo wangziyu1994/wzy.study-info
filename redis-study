@@ -1,6 +1,6 @@
 redis 基本数据类型
-string 字符串，redis的基本数据类型  ============set [keyname]  [keyvalue]   ||    get [keyname]
-hash   键值对集合 ============hmset [keyname] [keyname1] [keyvalue1]  [keyname2] [keyvalue2] [keyname3] [keyvalue3] ...|| hgetall [keyname]
+string 键值，redis的基本数据类型  ============set [keyname]  [keyvalue]   ||    get [keyname]
+hash   键值对集合 ============hmset [keyname] [keyname1] [keyvalue1]  [keyname2] [keyvalue2] [keyname3] [keyvalue3] ...|| hgetall [keyname]   || hkeys [hkeys] 
 list  字符串列表  ============lpush  [listname]  [value1] [value2]  [value3]...... ||  lrange  [listname]  [indexstart]  [indexend]
 set  字符串无序集合,无重复    ============sadd [keyname] [keyvalue]; ||  smembers [keyname] 
 zset 字符串有序集合，无重复    ============zadd [keyname] [scoreindex]  [keyvalue] || zmembers [keyname] [indexstart] [indexend]   

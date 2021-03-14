@@ -1,0 +1,13 @@
+1,Spring Environment 两个属性的初始化  系统属性SystemPropertySource  PropertySource
+
+
+2, Spring initPropertySource() 方法的用处  setRequiredProperties次方法作用
+
+
+2,Spring customizeBeanFactory 自己重写 更改allowReference  allowBeanDefinaitionOverWriting 设置BeanFactory的其他属性
+
+
+4,xmlBeanDefinaitionReader()   适配器设计模式
+
+
+5,EntityResolver用法    PluggableSchemaResolver 如何处理XSD文件的

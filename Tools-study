@@ -2,3 +2,9 @@
 ctrl+shift+T 查看接口的所有实现类
 ctrl+alt+H 查看该方法被哪些类调用了
 ctrl+shift+G 查看该方法到底在哪被调用了
+
+2,IDEA快捷键
+shift+shift  全局搜索
+ctrl+alt+<- 回退至上一步
+ctrl+H 查看类的子类
+ctrl+alt+L 格式化代码

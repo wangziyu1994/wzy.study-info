@@ -1,3 +1,63 @@
+java 线程
+1,三种 创建方式
+
+线程join方法 让执行此方法的线程对象优先执行，其他线程进入堵塞状态,并且yield方法并不让其他等待的线程得到此线程的执行权
+线程wait方法  让线程进入等待状态，并且会释放锁。notify会唤醒被wait的线程，但是notify并不会释放锁对象.
+
+2,如何同步:
+2,1 volatile 
+底层MESI缓存一致性原理,保证可见性,指令有序性.
+
+2.2 CAS compare and swap 
+保证原子性,可见性，指令有序性  
+当改变共享变量时，与自己的预期值(上一次修改后的值)做比较,符合则修改。否则则更新预期值,继续循环比较.
+AtomicInteger AtomicLong
+LongAddr 当并发非常大时,分为数组，每个数组单独进行自选锁操作，最后SUM累加得值。
+问题：可能产生ABA问题 加入版本号解决. new AtomicStampReference(变量值,版本号);
+问题：并发大时CPU负载高。影响性能.
+
+
+2.3 synchronized 代码块 方法
+并发数小的时候CAS自选锁,并发大的时候重量级锁.
+
+2.4 ReenTrantLock
+可以完全替代synchronized
+不同点: 可以设置公平锁,非公平锁
+可以设置interrupt中断线程
+可以设置tryLock(超时时间) 
+
+2.5栅栏:
+CountDownLatch CyclicBarrier  Phrase
+2.6交换:
+Exchanger
+
+2.7 重量级锁/轻量级锁   公平锁/非公平锁   共享锁/排他锁
+
+
+2.8 LockSupport LockSupport的 PARK方法暂停一个线程  UNPARK方法解除一个线程的暂停。 UNPARK方法一个先于PARK方法运行。比较灵活。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 java线程池
 使用 Executors中的静态方法即可创造thread pool 主要有以下三种：
 方法名	功能
