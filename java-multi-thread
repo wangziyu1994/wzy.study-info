@@ -37,22 +37,24 @@ Exchanger
 2.8 LockSupport LockSupport的 PARK方法暂停一个线程  UNPARK方法解除一个线程的暂停。 UNPARK方法一个先于PARK方法运行。比较灵活。
 
 
+3,同步底层原理:AQS
 
+3.1 ReenTrantLock有一个内部类Syn    lock();方法调用Syn的acquire(1)方法  Syn继承AbstractSynchronizedQueue  调用AbstractSynchronizedQueue
+的acquire方法   acquire方法中有两个方法判断:a,!tryAcquire()方法 b,acquireQueued（）方法 a为false未获得锁, b为true表示不用进入队列
 
+3.2 tryAcquire(args)方法:来自于Syn自身的重写方法 ----->根据实现类的不同，有公平性锁的方法以及非公平性锁的方法
 
+3.2.1 getState()方法获取volatile 1说明有人持有  0说明锁无线程持有  state的值(继承自AbstractSynchronizedQueue)
 
+3.2.2 state为0进入hasQueuedPredecessors(),非公平性锁没有此判断,根据队列判断是否有资格尝试获取锁，
+详情见 https://blog.csdn.net/weixin_38106322/article/details/107154961
+3.2.2.1 如果hasQueuedPredecessors()(非公平锁不用放入队列，直接竞争)返回false 继续compareAndSetState() 设置state=state+1原子性操作，线程安全
 
+3.2.3 setExclusiveOwnerThread 设置exclusiveOwnerThread属性为当前线程
 
+3.2.4 如果state!=0,继续判断exclusiveOwnerThread属性是否是当前线程. 如果是则继续，保证锁的重入性. 设置state=state+1.
 
-
-
-
-
-
-
-
-
-
+3.3acquireQueued(addWaiter(Node.EXCLUSIVE), arg))方法
 
 
 

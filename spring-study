@@ -7,8 +7,19 @@ SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource�
 5, 配置文件路径由String --------->String []----------------->Resource[]-------------------------->Resource  
 6,xmlDefinaitionReader 采用SAX解析把xml对象先转化为Document对象 对于beans下已有的element做符合自身XSD的处理，
 对于自定义element,先根据element.getNamespaceUri方法获取此标签的namespace名称,再根据namespaceUri  到spring.handler文件中找到对应的namespaceHandler
-7,找到此element的namespaceHandler后 根据element的属性方法获取属性名称，根据名称找到对应的属性parser 
-8,根据属性parser将属性和属性值转为为对应的BeanDefinition
+7,找到此element的namespaceHandler后,反射实例化Handler 根据elmentName在Handler里面找到对应的parser
+8,根据属性parser将属性和属性值,Class类型转化为对应的BeanDefinition
+
+
+1.2自定义属性编辑器
+1.2.1 首先要有一个自定义属性编辑器,将xml中的propertyValue 按照一定规则转化为相应的对象.
+1.2.2 要在属性赋值时调用自定义属性编辑器，填充转换后的属性值.这一步在BeanWrapper当中，所以要将属性编辑器移动到BW当中
+1.2.3 为了找到对应的属性的属性编辑器需要CLASS以及PropertyEditor 所以需要PropertyEditorRegistar将两者注入到一个Map当中去
+1.2.3 要将属性编辑器移动到BeanWrapper当中，只能先放入BeanFactory.
+1.2.4 要将属性编辑器移动到BeanFactory当中，利用BeanFactoryProcessor 在实例化Bean之前做好这些操作，方便实例化，初始化填充属性调用。
+1.2.5 Spring 提供了一个CustomConfigureEditor将属性编辑器移动到BeanFactory当中去.所以要先将PropertyEditorRegistar注册到CustomConfigureEditor
+或者直接将Class,PropertyEditor放入CustomConfigureEditor里的Map.
+
 
 
 

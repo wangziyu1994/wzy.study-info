@@ -1,0 +1,6 @@
+1，spring的声明式事务
+2，JAVA 的强弱 引用
+3，ReenTrantLock unlock方法
+4,弱应用的应用
+5,ThreadLocal 为什么要用的弱引用
+6.spring  autowiredByName   autowiredByType
