@@ -22,6 +22,21 @@ SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource�
 
 
 
+2.BeanFacoryPostProcessor(BFP)  BeanFactoryRegistryPostProcessor(BRP)的执行顺序。
+2.1 初始化两个容器 一个存在BFP 一个存放BRP  registryBeanFactoryProcessors   regularBeanFactoryProcessors
+2.2 存放外部自定义的所有BFP 存放外部自定义的BRP 并且执行BRP自身的实现方法
+2.3 获取内部所有的BRP且优先级为PritorOrder的  存放所有的BRP并且执行BRP自身的实现方法。
+2.4 获取内部所有的BRP且优先级为Order的的  存放所有的BRP并且执行BRP自身的实现方法.
+2.5 循环获取(防止在调用BRP实现方法的同时，注册进来新的BRP!)所有剩下的BRP 存放所有的BRP 并且执行BRP自身的实现方法。
+2.6 执行所有BRP从BFP继承的实现方法
+2.7 执行外部所有BFP的实现方法
+2.9 初始化三个容器 一个存放PO BFP  一个存放OR  BFP  一个存放普通BFP
+2.10 获取内部所有的BFP且优先级为PritoryOrder的 存放所有的BFP(如果在之前执行BRP是就已经执行过，这不进行获取执行)
+2.11 获取内部所有的BFP且优先级为Order的 存放所有的BFP(如果在之前执行BRP是就已经执行过，这不进行获取执行)
+2.12 获取内部所有的BFP且优先级为普通的 存放所有的BFP(如果在之前执行BRP是就已经执行过，这不进行获取执行)
+2.12 一次执行内部所有的BFP的实现方法 结束.
+
+
 
 
 1,spring IOC
@@ -62,7 +77,7 @@ close
 3.1 Bean元信息处理阶段
 3.1.1 Bean元信息解析阶段:xml文件 注解 通过相应的BeanDefinitionReader转化成BeanDefinition
 3.1.2 Bean注册阶段:将BeanDefinition保存至BeanDefinitionRegistry(典型实现DefaultListableBeanFactory)方便后续调用
-3.1.3 BeanDefintion的合并阶段:将GenericBeanDefinition转化成RootBeanDefintion(具有父类的属性)
+3.1.3 BeanDefintion的合并阶段: (具有父类的属性)
 
 
 3.2 Bean实例化阶段

@@ -58,6 +58,61 @@ Exchanger
 
 
 
+4,ThreadLocal 原理实现 https://www.cnblogs.com/dennyzhangdd/p/7978455.html
+4.1 new ThreadLocal();------- threadLocalHashCode------->nextHashCode 方法 取得hashCode码值+1 CAS锁
+
+4.2get()方法
+4.2.1如果当前线程的ThreadLocalMap为null 则setInitialValue（）设定初始Value为null
+再一次判断 当前线程的ThreadLocalMap 是否为null 如果是 createMap() new ThreadLocalMap(当前ThreadLocal对象,null);
+4.2.2 进入ThreadLocalMap构造方法后，初始化一个容量为16的Entry数组，将Entry[ThreadLocal当前的hashCode%15]=new Entry(当前Threadlocal对象,null);
+
+4.2.3如果当前线程的ThreadLocalMap不为null 则map.getEntry(当前ThreadLocal对象) 获取Entry[ThreadLocal当前的hashCode%15]
+4.2.4如果 Entry[ThreadLocal当前的hashCode%15]不为null 且里面的ThreadLocal等于当前ThreadLocal对象，则返回，
+否则getEntryAfterMiss(当前ThreadLocal对象, ThreadLocal当前的hashCode%15, Entry[ThreadLocal当前的hashCode%15]);
+4.2.5遍历当前线程ThreadLocalMap的Entry数组 若果e.get()==当前ThreadLocal对象则返回，否则
+
+4.3 set()方法
+4.3.1判断当前线程的ThreadLocalMap 是否为null 如果是 createMap() new ThreadLocalMap(当前ThreadLocal对象,null);
+4.3.2进入ThreadLocalMap构造方法后，初始化一个容量为16的Entry数组，将Entry[ThreadLocal当前的hashCode%15]=new Entry(当前Threadlocal对象,null);
+4.3.4如果不为null
+
+总结 每个Thread维护自己独立的ThreadLocalMap   每个线程第一次调用ThreadLocal对象get()方法 都会在在当前线程初始化一个ThreadLocalMap ThreadLocalMap<ThreadLocal,null>
+每个线程第一次调用set()方法，也会在当前线程初始化一个ThreadLocalMap<ThreadLocal,Value> 注意ThreadLocal是弱引用.
+
+
+
+5,JAVA关于多线程的容器
+1,List
+1.1 ArrayList 线程不安全
+1.2 LinkedList 线程不安全
+1.3 Vector 线程安全
+1.4 ConcurrentQueueList 线程安全  poll()方法判断 是否还存在元素，不存在返回null
+1.5 CopyAndWriteList 读不加锁，写加锁 写的时候复制数组 写完将底层数组复制到新数组中去
+
+2,Map
+2.1 HashMap 线程不安全
+2.2 TreeMap 线程不安全 有序
+2.3 HashTable 线程安全
+2.4 Collecton.synchronizedMap() 线程安全
+2.5 CocurrentMap 线程安全
+2.6 ConcurrentSkipListMap()线程安全 有序 跳表结构 查找元素相对较快.
+
+
+3,Queue
+add()方法，容量满时报错  offer()方法,容量满时返回false  peek()方法,返回不移除被取走的元素.  poll()返回移除被取走的元素，不存在返回null
+
+3.1 非阻塞队列
+3.1.1 ConcurrentLinkedQueue 无界队列
+
+3.2 阻塞队列
+put()容量满时，会阻塞当前线程。直至有剩余容量。 take()无元素时，会阻塞当前线程,直至有新的元素被添加进来.
+3.2.1 ArrayListBlockingQueue  LinkedListBlockingQueue
+3.2.2 DelayQueue 会根据元素对象的getDelay()  compareTo方法 的顺序返回元素》
+3.2.3 SynchronizedQueue  队列容量为0 put()方法会一直阻塞当前线程，直至有别的线程添加一个元素，才会释放当前线程.
+3.2.4 TransferQueue  put()方法同上， transfer()方法 也会阻塞当前线程，直至次元素被别的线程拿走时，才会释放当前线程.
+
+
+
 
 
 java线程池
