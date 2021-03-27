@@ -113,6 +113,50 @@ put()容量满时，会阻塞当前线程。直至有剩余容量。 take()无�
 
 
 
+4,Callable Future
+4.1 Callable和Runnable一样,都定义线程的任务，但是Callable有返回值，会返回一个结果.但是Callable不能交给Thread运行，要交给ThreadPool或者FutureTask
+4.2 Future可以接收Callable的返回值，调用它的get()方法会阻塞当前线程，直至有返回值.
+4.3 FutureTask 继承了Future   Runnable 既可以传入Callable对象 也可以传入Runnable对象
+可以直接交给Thread运行。并且调用它的get()方法会阻塞当前线程，并且可以获取线程放回值.
+
+
+5,Executors  ExecutorService
+5.1 Executors相当于ThreadPool的创建工厂，里面定义了一些JDK提供的ThreadPool
+5.2 ExecutorService 所有线程池都要继承这个接口 里面的submit()方法 可以提交任务给线程池.
+
+6,ThreadPool
+coreSize活跃线程数
+maxSize最大线程数
+aliveTime除coreSize以外线程的存活时间   timeUnit 存活时间单位
+Queue 线程池超过最大线程数量时 放入的容器
+RejectPolicy拒绝策略 队列容量达到最大时，采取的解决方案
+具体的拒绝策略有JDK提供的策略，或者自定义的策略
+AbortRejectPolicy 达到最大时,抛出异常
+DiscardRejectPolicy 达到最大时，放弃该任务。
+DiscardOldestPolicy 达到最大时，放弃进入队列最早的任务
+CallRunPolicy 达到最大时，将该任务交给任务的提交线程执行
+
+6.1 SingledThreadPool
+coreSize 1  maxSize 1 coreThread以外线程存活时间0   linkedBlockingQuue  无界队列（Integer.MAX_VALUE）
+
+6.2 CachedThreadPool
+coreSize 0 maxSize 无限制（Integer.MAX_VALUE)  coreThread以外线程存活时间60s SynchronousQueue 队列容量为0
+只有队列有被take()请求后 才可以put()元素
+
+6.3 FixedThreadPool
+coreSize 自定义 maxSize自定义 coreThread以外线程存活时间0  无界队列
+
+6.4 ScheduledThreadPool
+coreSize 自定义 maxSize 无限制（Integer.MAX_VALUE）  coreThread以外线程存活时间0 DelayedWorkQueue
+多少时间后执行  执行间隔  时间单位
+
+6.5 ForkJobThreadPool
+里面的任务对象继承RecursiveTask可以 实现分组任务，规定分组规则
+
+6.6 WorkStealingThreadPool
+线程池里多组队列。当一个满的队列有空间时会偷取其余满的队列的任务执行。
+
+
 
 
 java线程池

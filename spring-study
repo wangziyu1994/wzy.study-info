@@ -37,6 +37,22 @@ SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource�
 2.12 一次执行内部所有的BFP的实现方法 结束.
 
 
+3,ConfigurePostBeanProcessor的加载（重点）
+3.1 配置文件<context:componentScan>标签 会解析basePackages属性 获取扫描包的路径
+3.2 将包下面的类转化为ScanAnnotationBeanDefinition 并且加入BeanDefinitionMap当中去,并且将一些Spring内部的InnerBean自动添加ConfigurationClassPostProcessor，AutowiredAnnotationBeanPostProcessor等等
+3.3 后续执行外部BRP的实现方法时，会执行 ConfigurationClassPostProcessor的postProcessBeanDefinitionRegistry方法，进一步执行processConfigBeanDefinitions方法
+3.4 processConfigBeanDefinitions方法 会调用ConfigurationClassParser的parse方法对所有的Sbd进行parse();
+3.5 parse()方法 doProcessConfigurationClass()方法
+3.6 doProcessConfigurationClass() 先判断是否是@Component注解(@Configuration注解组合注解包含了@Component)
+3.7 如果是，则processMemberClasses() 继续扫描带有配置注解的内部类
+3.8 获取所有带有注解的内部类  再次调用processConfigurationClass（）方法(递归可以解析所有注解修饰的内部类)
+3.9 判断是否是@PropertySource注解修饰修饰的类
+3.10 如果是加载相应的Properties文件
+3.11 判断是否是@ComponentScan注解修饰的类，
+3.12 如果是 加载 @ComponentScan  basePackages里面的所有注解修饰的配置类到BeanFactory中去 然后再次调用processConfigBeanDefinitions方法递归解析所有注解配置类
+
+
+
 
 
 1,spring IOC
