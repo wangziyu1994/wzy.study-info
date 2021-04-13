@@ -10,7 +10,6 @@ SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource�
 7,找到此element的namespaceHandler后,反射实例化Handler 根据elmentName在Handler里面找到对应的parser
 8,根据属性parser将属性和属性值,Class类型转化为对应的BeanDefinition
 
-
 1.2自定义属性编辑器
 1.2.1 首先要有一个自定义属性编辑器,将xml中的propertyValue 按照一定规则转化为相应的对象.
 1.2.2 要在属性赋值时调用自定义属性编辑器，填充转换后的属性值.这一步在BeanWrapper当中，所以要将属性编辑器移动到BW当中
@@ -36,9 +35,8 @@ SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource�
 2.12 获取内部所有的BFP且优先级为普通的 存放所有的BFP(如果在之前执行BRP是就已经执行过，这不进行获取执行)
 2.12 一次执行内部所有的BFP的实现方法 结束.
 
-
-3,ConfigurePostBeanProcessor的加载（重点）
-3.1 配置文件<context:componentScan>标签 会解析basePackages属性 获取扫描包的路径
+3,ConfigurePostBeanProcessor的加载（重点）  
+3.1 配置文件<context:componentScan>标签 会解析basePackages属性 获取扫描包的路径  
 3.2 将包下面的类转化为ScanAnnotationBeanDefinition 并且加入BeanDefinitionMap当中去,并且将一些Spring内部的InnerBean自动添加ConfigurationClassPostProcessor，AutowiredAnnotationBeanPostProcessor等等
 3.3 后续执行外部BRP的实现方法时，会执行 ConfigurationClassPostProcessor的postProcessBeanDefinitionRegistry方法，进一步执行processConfigBeanDefinitions方法
 3.4 processConfigBeanDefinitions方法 会调用ConfigurationClassParser的parse方法对所有的Sbd进行parse();
@@ -50,10 +48,572 @@ SystemEnvironmentPropertySource(系统环境变量PATH）  SystemPropertySource�
 3.10 如果是加载相应的Properties文件
 3.11 判断是否是@ComponentScan注解修饰的类，
 3.12 如果是 加载 @ComponentScan  basePackages里面的所有注解修饰的配置类到BeanFactory中去 然后再次调用processConfigBeanDefinitions方法递归解析所有注解配置类
+3.13 判断是否是@Import注解修饰的类，
+3.14 初始化一个访问过的所有类的集合，初始化一个存放@Import value里面的类
+3.15 collectImport()递归调用，最终达到遍历所有注解的效果.
+3.16 processImports()处理得到的@Import value里的类
+3.17 判断是否@Import value里的类是否实现了ImportSelector接口
+3.18 如果是 继续判断是否实现了deferredImportSelector接口，如果是将其添加到deferredImportSelector的集合当中去  
+3.19 之后将DeferredImportSelector的元素 进行process方法 deferredImportSelectorHandler.process() 
+3.20 将DeferedImportSelector里的元素包装成group对象再调用它的getImports()方法
+3.21 getImport()方法中会调用@DeferredImportSelector的process()方法,比如：springboot 当中@AutoConfigurationImportSelector的解析  
+3.22 AutoConfigurationImportSelector的process()方法会加载spring.factories文件,将文件中的一堆配置类的相关信息加载进来 ()  
+
+
+4.ApplicationListener 事件监听器  
+```java
+
+//方法初始化一个事件多播器,
+initApplicationEventMulticaster();
+//此多播器继承AbstractApplicationEventMulticaster
+this.applicationEventMulticaster = new SimpleApplicationEventMulticaster(beanFactory);
+//内部类存在一个存放监听器的集合
+private final DefaultListenerRetriever defaultRetriever = new DefaultListenerRetriever();
+//存放监听器的集合
+public final Set<ApplicationListener<?>> applicationListeners = new LinkedHashSet<>();
+//存放监听器名称的集合
+public final Set<String> applicationListenerBeans = new LinkedHashSet<>();
+//注册监听器,进各类监听器放入BeanFactory当中去
+registerListeners();
+//监听器在spring-boot当中的应用
+//实例化spring.factories的13个监听器
+SpringApplicationRunListeners listeners = getRunListeners(args);
+//spring.factories当中有13个监听器,其中一个监听器的构造器初始化多播器
+public EventPublishingRunListener(SpringApplication application, String[] args) {
+		this.application = application;
+		this.args = args;
+		this.initialMulticaster = new SimpleApplicationEventMulticaster();
+		for (ApplicationListener<?> listener : application.getListeners()) {
+			this.initialMulticaster.addApplicationListener(listener);
+		}
+	}
+this.initialMulticaster.multicastEvent(new ApplicationStartedEvent(this.application, this.args));
+//根据事件类型,选择对应的监听器,让监听器执行相应的操作
+	public void multicastEvent(final ApplicationEvent event, ResolvableType eventType) {
+		ResolvableType type = (eventType != null ? eventType : resolveDefaultEventType(event));
+		for (final ApplicationListener<?> listener : getApplicationListeners(event, type)) {
+			Executor executor = getTaskExecutor();
+			if (executor != null) {
+				executor.execute(new Runnable() {
+					@Override
+					public void run() {
+						invokeListener(listener, event);
+					}
+				});
+			}
+			else {
+				invokeListener(listener, event);
+			}
+		}
+	}
+
+```
 
 
 
 
+
+5.Spring Conversionservice
+
+```
+PlaceholderConfigurerSupport 继承PropertiesLoaderSupport 实现BeanFactoryPostProcessor
+StringValueResolver valueResolver = new PlaceholderResolvingStringValueResolver(props);
+doProcessProperties(beanFactoryToProcess, valueResolver);
+
+doProcessProperties方法 beanFactoryToProcess.addEmbeddedValueResolver(valueResolver);//将valueResorlver加入到beanFactory的embeddedValueResolvers属性当中去
+
+
+	//如果之前没有StringvalueResolver,则自动注入一个StringValueResolver
+		if (!beanFactory.hasEmbeddedValueResolver()) {
+			beanFactory.addEmbeddedValueResolver(strVal -> getEnvironment().resolvePlaceholders(strVal));
+		}
+		
+```
+
+```xml
+<bean id="conversionservice" class="org.springframework.context.support.ConversionServiceFactoryBean">
+    <property name="converters">   
+    <set>
+        <bean class="com.springsource.custom.WzyConverter"/>
+     </set>
+    </property>
+</bean>
+```
+
+
+
+## 6.spring FactoryBean的注入
+
+1，如果要创建在SringBean生命周期之外的Bean 可以创建 一个实现FactoryBean接口的实现类工厂，利用里面的getObject()  getType()  isSingleTonBean() 方法返回自定义Bean.
+
+2，applicationContext启动过程中只会实例化FactoryBean接口的实现类放入一级工厂，只有调用getBean(“自定义工厂Name”)方法时才会真正返回getObject()创建的对象。如果调用getBean(“&自定义工厂Name”)方法，则会返回此自定义工厂对象.里面有判断如下：
+
+```java//判断名称是否含有&前缀if (BeanFactoryUtils.isFactoryDereference(name)) {  
+if (beanInstance instanceof NullBean) {     
+return beanInstance; 
+}
+}
+return (name != null && name.startsWith(BeanFactory.FACTORY_BEAN_PREFIX));```
+```
+
+3, 一级缓存里会存放实现FactoryBean接口的自定义工厂Bean,而如果是单例模式的话factoryBeanObjectCache
+
+会存放getObject()创建出的自定义Bean.如果不是单例模式的话则会重新调用实现FactoryBean接口的实现类的getObject()方法创建新Bean对象。
+
+```java	if (mbd != null) {
+if (factory.isSingleton() && containsSingleton(beanName)) {
+			synchronized (getSingletonMutex()) {
+				//尝试从factoryBeanObjectCache获取，如果不存在返回getObject并且添加到factoryBeanObjectCache，存在则返回。适用于单例模式
+				Object object = this.factoryBeanObjectCache.get(beanName);
+				if (object == null) {
+					//返回实现FactoryBean接口的getObject对象
+					object = doGetObjectFromFactoryBean(factory, beanName);
+					// Only post-process and store if not put there already during getObject() call above
+					// (e.g. because of circular reference processing triggered by custom getBean calls)
+					Object alreadyThere = this.factoryBeanObjectCache.get(beanName);
+					if (alreadyThere != null) {
+						object = alreadyThere;
+					}
+					else {
+						if (shouldPostProcess) {
+							if (isSingletonCurrentlyInCreation(beanName)) {
+								// Temporarily return non-post-processed object, not storing it yet..
+								return object;
+							}
+							beforeSingletonCreation(beanName);
+							try {
+								object = postProcessObjectFromFactoryBean(object, beanName);
+							}
+							catch (Throwable ex) {
+								throw new BeanCreationException(beanName,
+										"Post-processing of FactoryBean's singleton object failed", ex);
+							}
+							finally {
+								afterSingletonCreation(beanName);
+							}
+						}
+						if (containsSingleton(beanName)) {
+							this.factoryBeanObjectCache.put(beanName, object);
+						}
+					}
+				}
+				return object;
+			}
+		}
+		else {
+			//非单例BeanFactory创建的Bean
+			Object object = doGetObjectFromFactoryBean(factory, beanName);
+			if (shouldPostProcess) {
+				try {
+					object = postProcessObjectFromFactoryBean(object, beanName);
+				}
+				catch (Throwable ex) {
+					throw new BeanCreationException(beanName, "Post-processing of FactoryBean's object failed", ex);
+				}
+			}
+			return object;
+		}
+	
+​```
+```
+
+
+
+
+
+## 7.Spring lookupmethod标签的使用与解析原理
+
+#### 7.1使用 
+
+```xml	<bean id="cat1" class="com.springsource.lookupmethodstudy.Cat">
+​```xml
+	<bean id="cat1" class="com.springsource.lookupmethodstudy.Cat">
+	</bean>
+
+	<bean id="dog1" class="com.springsource.lookupmethodstudy.Dog">
+	</bean>
+
+	<bean id="animal1" class="com.springsource.lookupmethodstudy.Animal">
+		<lookup-method bean="cat1" name="getAnimal"></lookup-method>
+	</bean>
+​```
+```
+
+
+
+#### 7.2解析
+
+
+
+##### 7.2.1 首先，如果该Bean标签含有lookup-method标签，那么会设定此Bean的一个标志位位false方便实例化时获取
+
+```java 
+mbdToUse.prepareMethodOverrides();
+//===================================================================================
+if (hasMethodOverrides()) {
+			getMethodOverrides().getOverrides().forEach(this::prepareMethodOverride);
+		}
+//===================================================================================
+	int count = ClassUtils.getMethodCountForName(getBeanClass(), mo.getMethodName());
+		if (count == 0) {
+			throw new BeanDefinitionValidationException(
+					"Invalid method override: no method with name '" + mo.getMethodName() +
+					"' on class [" + getBeanClassName() + "]");
+		}
+		else if (count == 1) {
+			//设置标志位，避免之后的判断，为下文做铺垫
+			// Mark override as not overloaded, to avoid the overhead of arg type checking.
+			mo.setOverloaded(false);
+		}
+```
+
+
+
+##### 7.2.2 设定过标志位后，下文实例化此Bean 会判断标志位如果设定过标志位则采用CgLib策略模式生成此Bean
+
+
+
+```java 
+if (!bd.hasMethodOverrides()) {
+
+}
+else {
+			// Must generate CGLIB subclass.
+			return instantiateWithMethodInjection(bd, beanName, owner);
+		}
+//===================================================================================
+
+return new CglibSubclassCreator(bd, owner).instantiate(ctor, args);
+
+//===================================================================================
+		//CgLib为此BeanDefinition生成一个子类
+			Class<?> subclass = createEnhancedSubclass(this.beanDefinition);
+			Object instance;
+			if (ctor == null) {
+				instance = BeanUtils.instantiateClass(subclass);
+			}
+			else {
+				try {
+					Constructor<?> enhancedSubclassConstructor = subclass.getConstructor(ctor.getParameterTypes());
+					instance = enhancedSubclassConstructor.newInstance(args);
+				}
+				catch (Exception ex) {
+					throw new BeanInstantiationException(this.beanDefinition.getBeanClass(),
+							"Failed to invoke constructor for CGLIB enhanced subclass [" + subclass.getName() + "]", ex);
+				}
+			}
+			// SPR-10785: set callbacks directly on the instance instead of in the
+			// enhanced class (via the Enhancer) in order to avoid memory leaks.
+			Factory factory = (Factory) instance;
+			//在Callbacks里面设置lookupOverride拦截器
+			factory.setCallbacks(new Callback[] {NoOp.INSTANCE,
+					new LookupOverrideMethodInterceptor(this.beanDefinition, this.owner),
+					new ReplaceOverrideMethodInterceptor(this.beanDefinition, this.owner)});
+			return instance;
+```
+
+
+
+##### 7.2.3 此时BeanFactory当中存放的是两个CGLib生成的目标类的子类对象。当使用此对象调用它的重写方法时,CGlib的lookupmethod  Interceptor就会生效.
+
+```java 
+	public Object intercept(Object obj, Method method, Object[] args, MethodProxy mp) throws Throwable {
+			// Cast is safe, as CallbackFilter filters are used selectively.
+			LookupOverride lo = (LookupOverride) getBeanDefinition().getMethodOverrides().getOverride(method);
+			Assert.state(lo != null, "LookupOverride not found");
+			Object[] argsToUse = (args.length > 0 ? args : null);  // if no-arg, don't insist on args at all
+			if (StringUtils.hasText(lo.getBeanName())) {
+				Object bean = (argsToUse != null ? this.owner.getBean(lo.getBeanName(), argsToUse) :
+						this.owner.getBean(lo.getBeanName()));
+				// Detect package-protected NullBean instance through equals(null) check
+				return (bean.equals(null) ? null : bean);
+			}
+			else {
+				return (argsToUse != null ? this.owner.getBean(method.getReturnType(), argsToUse) :
+						this.owner.getBean(method.getReturnType()));
+			}
+		}
+	}
+```
+
+
+
+##### 7.2.4 为什么要使用lookup-method标签，解决了什么问题？
+
+1. lookup-method标签解决了单例模式的对象 引用多例的问题
+
+2. 如果引用对象是多例模式的话,单例对象的引用，会因为单例对象一直存在于缓存中，而导致每次获取的引用也是第一次创建的引用对象。
+
+3. 如果采用lookup-method的话则解决此问题，lookupMethodInteceptor 会在获取此引用对象时(getBean()方法)判断此对象的创建模式，如果是多例模式的话，那么就会调用多例模式的创建方法，生成一个全新的对象.
+
+```xml 
+	<bean id="cat1" class="com.springsource.lookupmethodstudy.Cat" scope="singleton">
+	</bean>
+
+	<bean id="dog1" class="com.springsource.lookupmethodstudy.Dog" scope="prototype">
+	</bean>
+
+	<bean id="catOrDog1" class="com.springsource.lookupmethodstudy.CatOrDog">
+		<lookup-method bean="cat1" name="getAnimal"></lookup-method>
+	</bean>
+
+	<bean id="catOrDog2" class="com.springsource.lookupmethodstudy.CatOrDog" >
+		<lookup-method bean="dog1" name="getAnimal" ></lookup-method>
+	</bean>
+
+
+	<bean id="refDog" class="com.springsource.lookupmethodstudy.RefDog" >
+		<property name="animal" ref="dog1"></property>
+	</bean>
+
+
+```
+
+```java 
+//多例模式的创建
+else if (mbd.isPrototype()) {
+					// It's a prototype -> create a new instance.
+					Object prototypeInstance = null;
+					try {
+						beforePrototypeCreation(beanName);
+						prototypeInstance = createBean(beanName, mbd, args);
+					}
+					finally {
+						afterPrototypeCreation(beanName);
+					}
+					beanInstance = getObjectForBeanInstance(prototypeInstance, name, beanName, mbd);
+				}
+```
+
+
+
+
+
+###8.Supplier创建Bean
+
+1. 如果一个beanDefintion设置了instanceSupplier属性的话，那么就会根据实现此supplier的lambda表达式创建bean
+
+	```java 
+	Supplier<?> instanceSupplier = mbd.getInstanceSupplier();
+			if (instanceSupplier != null) {
+				return obtainFromSupplier(instanceSupplier, beanName);
+			}
+	\\=======================================================================
+		protected BeanWrapper obtainFromSupplier(Supplier<?> instanceSupplier, String beanName) {
+			Object instance;
+	
+			String outerBean = this.currentlyCreatedBean.get();
+			this.currentlyCreatedBean.set(beanName);
+			try {
+				//调用实现supplier接口的get方法
+				instance = instanceSupplier.get();
+			}
+			finally {
+				if (outerBean != null) {
+					this.currentlyCreatedBean.set(outerBean);
+				}
+				else {
+					this.currentlyCreatedBean.remove();
+				}
+			}
+	
+			if (instance == null) {
+				instance = new NullBean();
+			}
+			//创建此对象的包装类
+			BeanWrapper bw = new BeanWrapperImpl(instance);
+			//初始化此对象，填充属性
+			initBeanWrapper(bw);
+			return bw;
+		}
+	```
+
+	
+
+	
+
+2. 可以通过BFPP 来给BeanDefinition来设置instanceSupplier属性
+
+	```java  
+	public class WzyBeanFactoryProcessor implements BeanFactoryPostProcessor {
+		@Override
+		public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
+			BeanDefinition beanDefinition=beanFactory.getBeanDefinition("wzySupplierBean");
+			GenericBeanDefinition gbd=(GenericBeanDefinition)beanDefinition;
+			gbd.setInstanceSupplier(WzySupplierBean::get);
+		}
+	}
+	```
+
+	```xml  
+		<bean id="wzyBeanFactoryProcessor" class="com.springsource.suppliesstudy.WzyBeanFactoryProcessor" >
+		</bean>
+	
+		<bean id="wzySupplierBean" class="com.springsource.suppliesstudy.WzySupplierBean" ></bean>
+	```
+
+	
+
+### 9.InstantiationAwareBeanPostProcessor 创建Bean
+
+1. 如果此工厂中含有 **InstantiationAwareBeanPostProcessor**  的话 那么会先执行他的postProcessBeforeInstantiation来实例化相应的Bean.在通过**BeanPostProcessor的postProcessAfterInitialization**初始化
+
+	```java  
+	// Give BeanPostProcessors a chance to return a proxy instead of the target bean instance.
+				//如果工厂中含有InstantiationAwareBeanPostProcessor的话,那么会用他的beforepost方法来实例化相应的Bean
+				Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
+				if (bean != null) {
+					return bean;
+				}
+	//=====================================================================
+		protected Object resolveBeforeInstantiation(String beanName, RootBeanDefinition mbd) {
+			Object bean = null;
+			if (!Boolean.FALSE.equals(mbd.beforeInstantiationResolved)) {
+				// Make sure bean class is actually resolved at this point.
+				if (!mbd.isSynthetic() && hasInstantiationAwareBeanPostProcessors()) {
+					Class<?> targetType = determineTargetType(beanName, mbd);
+					if (targetType != null) {
+						bean = applyBeanPostProcessorsBeforeInstantiation(targetType, beanName);
+						if (bean != null) {
+							bean = applyBeanPostProcessorsAfterInitialization(bean, beanName);
+						}
+					}
+				}
+				mbd.beforeInstantiationResolved = (bean != null);
+			}
+			return bean;
+		}
+	\\==============================================================================
+	    	protected Object applyBeanPostProcessorsBeforeInstantiation(Class<?> beanClass, String beanName) {
+			for (InstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().instantiationAware) {
+				Object result = bp.postProcessBeforeInstantiation(beanClass, beanName);
+				if (result != null) {
+					return result;
+				}
+			}
+			return null;
+		}
+	\\===============================================================================
+	    	public Object applyBeanPostProcessorsAfterInitialization(Object existingBean, String beanName)
+				throws BeansException {
+	
+			Object result = existingBean;
+			for (BeanPostProcessor processor : getBeanPostProcessors()) {
+				Object current = processor.postProcessAfterInitialization(result, beanName);
+				if (current == null) {
+					return result;
+				}
+				result = current;
+			}
+			return result;
+		}
+	```
+
+	2. 所以可以通过定义**InstantiationAwareBeanPostProcessor**  重写对应的方法 来创建相应的Bean
+
+		```xml  
+		<bean id="wzyInstantiationBeanPostProcessor" class="com.springsource.beanpostprocessor.WzyInstantiationBeanPostProcessor" >
+			</bean>
+
+			<bean id="personPost" class="com.springsource.beanpostprocessor.Person" >
+			</bean>
+		```
+		
+
+
+
+```java  
+	public Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName) throws BeansException {
+		if(beanClass==Person.class) {
+			System.out.println("调用WzyInstantiationBeanPostProcessor  BeforeInstantiation方法");
+			Enhancer enhancer=new Enhancer();
+			return new Person(1, "小龙女");
+		}
+		return null;
+	}
+
+	public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+		System.out.println("调用WzyInstantiationBeanPostProcessor  AfterInstantiation方法");
+		if(bean instanceof  Person){
+			Person person=(Person) bean;
+			person.setName("黄蓉");
+			person.setId(2);
+			return person;
+		}
+		return null;
+	}
+```
+
+
+
+
+
+### 10. 静态工厂创建Bean/实例工厂创建Bean
+
+1. 如果一个BeanDefinition的factory-Method属性不为空的话，那么就采用这种方式创建Bean
+
+	```java  
+		//判断此BeanDefinition的factoryMethod属性，如果有的话采用FactoryMethod的形式来创建对象
+			if (mbd.getFactoryMethodName() != null) {
+				return instantiateUsingFactoryMethod(beanName, mbd, args);
+			}
+	\\================================================================================
+	    	protected BeanWrapper instantiateUsingFactoryMethod(
+				String beanName, RootBeanDefinition mbd, @Nullable Object[] explicitArgs) {
+	
+			return new ConstructorResolver(this).instantiateUsingFactoryMethod(beanName, mbd, explicitArgs);
+		}
+	
+	\\================================================================================
+	    
+	```
+
+2. 创建工厂Bean钰指定工厂创建指定Bean.
+
+	```java 
+	public class WzyStaticBeanFactory {
+		public static Person createPerson(int args1,String args2){
+			return new Person(args1,args2);
+		}
+	
+	
+		public static Person createPerson(int args1){
+			return new Person(args1);
+		}
+	}
+	
+		public  Person createPerson(int args1,String args2){
+			return new Person(args1,args2);
+		}
+	
+		public  Person createPerson(int args1){
+			return new Person(args1);
+		}
+	```
+
+	```xml  
+		<bean id="staticFactory-person1" class="com.springsource.factorymethodstudy.WzyStaticBeanFactory" factory-method="createPerson" scope="prototype">
+			<constructor-arg value="10"></constructor-arg>
+			<constructor-arg value="staticBeanPerson"></constructor-arg>
+		</bean>
+	
+		<bean id="staticFactory-person2" class="com.springsource.factorymethodstudy.WzyStaticBeanFactory" factory-method="createPerson" scope="singleton">
+			<constructor-arg value="11"></constructor-arg>
+		</bean>
+	
+		<bean id="wzyInstanceBeanFactory" class="com.springsource.factorymethodstudy.WzyInstanceBeanFactory" >
+		</bean>
+		<bean id="instanceFactory-person1" class="com.springsource.factorymethodstudy.Person" factory-bean="wzyInstanceBeanFactory" factory-method="createPerson" scope="prototype">
+			<constructor-arg value="12"></constructor-arg>
+			<constructor-arg value="instanceBeanPerson"></constructor-arg>
+		</bean>
+	
+		<bean id="instanceFactory-person2" class="com.springsource.factorymethodstudy.Person" factory-bean="wzyInstanceBeanFactory" factory-method="createPerson" scope="singleton">
+			<constructor-arg value="13"></constructor-arg>
+		</bean>
+	```
+
+	
 
 1,spring IOC
 xml配置,注解配置
@@ -106,13 +666,11 @@ close
 
 
 
-
 3.3 Bean初始化阶段:
 3.3.1 Bean的aware接口回调阶段
 3.3.2 Bean的初始化前阶段
 3.3.3 Bean的初始化阶段
 3.3.4 Bean的初始化后阶段
-
 
 
 
@@ -140,7 +698,6 @@ spring会在上下文关闭后触发GC 触发spring Bean的垃圾收集
 将初始化后的B由三级缓存移动至一级缓存。
 初始化A完成,此时A中的属性B已被填充.
 将初始化后的A由二级缓存移动至一级缓存。
-
 
 
 

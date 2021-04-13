@@ -1,0 +1,4 @@
+1. git常用命令
+    * git clone  \[url\]<br/> 复制远程仓库代码
+    * git remote add origin \[git@github.com:wangziyu1994/msb2020study.git\]关联远程仓库
+    * git commit 提交  -a 提交所有改动  -m ''添加提交信息
