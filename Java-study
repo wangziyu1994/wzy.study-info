@@ -1,3 +1,300 @@
+## 1.jdk ArrayList的的底层实现
+
+1. jdk1.7  int size  [] elementData  初始化ArrayList  默认初始化一个长度为10的Object数组
+
+每次添加一个元素size加1，当size大于数组的长度时，复制一个原数组1.5倍的新数组。
+
+2. jdk1.8   int size  [] elementData  初始化ArrayList  默认初始化一个长度为0的Object数组
+
+	当第一次调用add方法时，将空数组变为长度为10的数组,每次添加一个元素size加1，当size大于数组的长度时，复制一个原数组1.5倍的新数组.
+
+
+
+#### 2.Object 的hashCode()方法
+
+1. 把一个数通过一定算法（取余法......），计算出的值的长度固定。那么这种算法称作hash函数
+
+2. 得出的值称作hashCode 也叫散列码。
+3. jdk中的hashCode 通过对象的内存地址加hash算法得出的一个散列码.
+
+
+
+##2.jdk HashMap的底层实现
+
+### 1.jdk1.7
+
+1. 数组加链表
+
+2. 头擦法
+
+3. 1.7扩容的死循环问题
+
+	1. 多线程环境下
+
+	2. thread1 插入元素，发现容量达到扩容条件,新建新数组，将所有的元素遍历，重hash插入到新数组的过程，并且完成复制的流程
+
+	3. 因为采用的是头插法，如下
+
+		在遍历发生hash碰撞的链表中，首先会把原元素的下一指向指向当前数组的位置，再把原元素放入新数组当中，再进行下一次循环。此时A--------》A1-------->null的链表关系会变为
+
+		A1------------------》A---------》null
+
+		```java 
+		 void resize(int newCapacity) {  
+		        Entry[] oldTable = table;//老的数据  
+		        int oldCapacity = oldTable.length;//获取老的容量值  
+		        if (oldCapacity == MAXIMUM_CAPACITY) {//老的容量值已经到了最大容量值  
+		            threshold = Integer.MAX_VALUE;//修改扩容阀值  
+		            return;  
+		        }  
+		        //新的结构  
+		        Entry[] newTable = new Entry[newCapacity];  
+		        transfer(newTable, initHashSeedAsNeeded(newCapacity));//将老的表中的数据拷贝到新的结构中  
+		        table = newTable;//修改HashMap的底层数组  
+		        threshold = (int)Math.min(newCapacity * loadFactor, MAXIMUM_CAPACITY + 1);//修改阀值  
+		    }  
+		\\========================================================================
+		    //将老的表中的数据拷贝到新的结构中  
+		    void transfer(Entry[] newTable, boolean rehash) {  
+		        int newCapacity = newTable.length;//容量  
+		        for (Entry<K,V> e : table) { //遍历所有桶
+		            while(null != e) {  //遍历桶中所有元素（是一个链表）
+		                Entry<K,V> next = e.next;  
+		                if (rehash) {//如果是重新Hash，则需要重新计算hash值  
+		                    e.hash = null == e.key ? 0 : hash(e.key);  
+		                }  
+		                int i = indexFor(e.hash, newCapacity);//定位Hash桶  
+		                e.next = newTable[i];//元素连接到桶中,这里相当于单链表的插入，总是插入在最前面
+		                newTable[i] = e;//newTable[i]的值总是最新插入的值
+		                e = next;//继续下一个元素  
+		            }  
+		        }  
+		    }  
+		
+		```
+
+		
+
+	4. thread2 插入元素，发现容量达到扩容条件,也会把原元素的下一指向指向当前数组的位置，再把原元素放入新数组当中，再进行下一次循环。但此时新数组hash碰撞的链表关系已经变为
+
+		A1------------------》A---------》null，而老数组的hash碰撞的第一位依然是A  之后把A位置的下一指向新数组位置的元素，也就是B ，此时就会变为A<--------------------->A1无限循环下去
+
+		
+
+		
+
+### 2.jdk1.8
+
+1. 数组加链表加红黑树
+2. 尾插法
+
+##### 具体实现
+
+1. 首先初始化hashMap,默认一个扩容因子0.75
+
+2. put 的hash方法 拿到当前对象的hashCode 做二次散列，扰动函数，得到一个h 后面存放到数组h的位置
+
+	```java 
+	   public V put(K key, V value) {
+	        //hash方法二次散列加扰动函数，减少hash碰撞的频率
+	        return putVal(hash(key), key, value, false, true);
+	    }
+	//========================================================
+	static final int hash(Object key) {
+	        int h;
+	        //h = key.hashCode()) ^ (h >>> 16  二次hash 加散列
+	        return (key == null) ? 0 : (h = key.hashCode()) ^ (h >>> 16);
+	    }
+	\\============================================================
+	```
+
+	
+
+3. 第一次进入，初始容量为0，数组为null，所以需要初始一个数组
+
+```java 
+ if ((tab = table) == null || (n = tab.length) == 0)
+            n = (tab = resize()).length;
+\\==================================================================================
+     //数组长度为0时指定数组的长度为16，再次扩容的瓶颈为16*0.75=12
+        else {               // zero initial threshold signifies using defaults
+            newCap = DEFAULT_INITIAL_CAPACITY;
+            newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
+        }
+\\=================================================================================
+     //指定扩容瓶颈
+        threshold = newThr;
+        @SuppressWarnings({"rawtypes","unchecked"})
+                //新建扩容数组
+            Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
+        table = newTab;
+  return newTab;
+```
+
+
+
+4. 根据hash& 数组长度 求出此元素应放在数组的哪一个位置比较合适。前提是此处元素不能有值
+
+(n-1)&hash() 是一种hash算法，得出来的值就是Hash值,此种算法要求n 为2^n次方的数 
+
+```java 
+//(n - 1) & hash 位的与运算，根据hash求出应该放在数组的哪一个位置上比较合适，前提此位置无元素
+        if ((p = tab[i = (n - 1) & hash]) == null)
+            tab[i] = newNode(hash, key, value, null);
+
+```
+
+
+
+
+
+
+
+5. 如果此处发生hash碰撞，计算出来的hash值相同，判断此处的键和插入元素的键对象的地址相同，或者非空对象equals方法返回true,就用新值替换旧值.
+
+```java 
+ //如果此处的元素的hash和插入元素的hash相同,且（此处的键和插入元素的键对象的地址相同，或者非空对象equals方法返回true)
+            //那么就将此处元素的node对象暂存到e
+            if (p.hash == hash &&
+                ((k = p.key) == key || (key != null && key.equals(k))))
+                e = p;
+\\==========================================================================
+    //如果暂存对象的值不为空
+            if (e != null) { // existing mapping for key
+                //把原位置节点的值 暂存到V
+                V oldValue = e.value;
+                if (!onlyIfAbsent || oldValue == null)
+                    //把原位置节点的值替换为新值
+                    e.value = value;
+                afterNodeAccess(e);
+                //返回旧值
+                return oldValue;
+            }
+        }
+```
+
+
+
+6.  如果此处发生hash碰撞,计算出来的hash值不同.
+
+	遍历此处位置的链表,
+
+	吐过链表位置的所有元素都和插入元素不同，就直接把当前元素插入原链表的最后一个位置
+
+	如果链表位置有任意节点满足插入元素的键对象的地址相同，或者非空对象equals方法返回true,就用新值替换旧值.如果链表的长度到达7了，就开始树化.
+
+```java 
+ else {
+                //无限循环
+                for (int binCount = 0; ; ++binCount) {
+                    //如果原位置的节点的后面没有元素的话
+                    if ((e = p.next) == null) {
+                        //直接把插入元素放入原元素的下一个位置
+                        p.next = newNode(hash, key, value, null);
+                        //如果循环的次数到达第8次也就是原位置的链表已经有7个元素的话，开始树化
+                        if (binCount >= TREEIFY_THRESHOLD - 1) // -1 for 1st
+                            treeifyBin(tab, hash);
+                        break;
+                    }
+                    //再次判断原位置链表的对象是否和插入元素的hash值相等，（此处的键和插入元素的键对象的地址相同，或者非空对象equals方法返回true)
+                    //是的话把原位置节点暂存到e
+                    if (e.hash == hash &&
+                        ((k = e.key) == key || (key != null && key.equals(k))))
+                        //判断是统一元素，覆盖旧值
+                        break;
+                    p = e;
+                }
+            }
+```
+
+7. hashMap扩容的方法:
+
+	1. 如果数组元素达到容量的0.75时开始扩容。扩容长度为原数组的左移2位
+
+		```java 
+		        //如果数组的容量超过了0.75*容量（初始16）进行扩容
+		        if (++size > threshold)
+		            resize();
+		//================================================================
+		//新数组长度为原有数组左移以为即*2  新数组长度不能大于规定的最大长度，并且就有数组长度要大于等于 默认原始容量16
+		            else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
+		                     oldCap >= DEFAULT_INITIAL_CAPACITY)
+		                //新数组的扩容瓶颈为旧瓶颈的左移以为即使 12*2 24
+		                newThr = oldThr << 1; // double threshold
+		        }
+		//=======================================================
+		 //指定扩容瓶颈
+		        threshold = newThr;
+		        @SuppressWarnings({"rawtypes","unchecked"})
+		                //新建扩容数组
+		            Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
+		        table = newTab;
+		        //如果超过初始化数组长度的话，进行扩容
+		        if (oldTab != null) {
+		            for (int j = 0; j < oldCap; ++j) {
+		                Node<K,V> e;
+		                //将原有数组的位置值暂存到e
+		                if ((e = oldTab[j]) != null) {
+		                    //将原有数组的位置元素至为null
+		                    oldTab[j] = null;
+		                    //如果原有数组位置的元素没有一个元素的话
+		                    if (e.next == null)
+		                        //重新hash,e.hash & (newCap - 1)直接求得该元素的hash值，将原有元素，放入新数组的位置中
+		                        newTab[e.hash & (newCap - 1)] = e;
+		                    else if (e instanceof TreeNode)
+		                        ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
+		                    //如果原有数组位置的元素还有下一个元素的话，采用高效算法算出hash值遍历，
+		                    //e.hash & oldCap的取出的值如果为0位置不变，取出的值如果为1位置为当前位置 + oldCap
+		                    else
+		                    { // preserve order
+		                        Node<K,V> loHead = null, loTail = null;
+		                        Node<K,V> hiHead = null, hiTail = null;
+		                        Node<K,V> next;
+		                        do {
+		                            next = e.next;
+		                            if ((e.hash & oldCap) == 0) {
+		                                //首位低位元素赋值
+		                                if (loTail == null)
+		                                    loHead = e;
+		                                //后续低位元素赋值
+		                                else
+		                                    loTail.next = e;
+		                                //更新末尾元素
+		                                loTail = e;
+		                            }
+		                            else {
+		                                //首位高位元素赋值
+		                                if (hiTail == null)
+		                                    hiHead = e;
+		                                //后续高位元素赋值
+		                                else
+		                                    hiTail.next = e;
+		                                //更新高位末尾元素
+		                                hiTail = e;
+		                            }
+		                            //遍历原位置所有链表元素
+		                        } while ((e = next) != null);
+		                        //最后一位低位元素取完，节点串联完
+		                        if (loTail != null) {
+		                            //更新最后一位低位元素取完的下一位元素为0
+		                            loTail.next = null;
+		                            //把低位首位元素放入数组
+		                            newTab[j] = loHead;
+		                        }
+		                        //最后一位高位元素取完，节点串联完
+		                        if (hiTail != null) {
+		                            //更新最后一位高位元素取完的下一位元素为0
+		                            hiTail.next = null;
+		                            //把高位首位元素放入数组
+		                            newTab[j + oldCap] = hiHead;
+		                        }
+		                    }
+		```
+
+		
+
+
+
 1,JAVA 强引用，软引用，弱引用，虚引用
 
 1.1 强引用: 只有当对象没有被引用时，GC回收垃圾时开始回收此对象，否则不会被回收.
@@ -8,12 +305,156 @@
 
 1.4 虚引用: 开辟在堆外的空间之内,任何时候都有可能被GC回收,在回收之前会被放入队列里面.
 
-3,动态代理
+### 3.代理
 
-3.1 JDK动态代理
+#### 3.1 静态代理
 
 
-3.2 ciglib动态代理
+
+#### 3.2 动态代理
+
+##### 3.2.1 JDK动态代理
+
+1. JDK动态代理底层的实现原理是运行时产生一个Class,此Class继承Proxy 并且实现了 传递的给定接口，因此JDK的动态代理只能对接口实现动态代理，而不能对类进行代理
+2. 此类有一个构造器，构造器的参数是InvocationHandler 并且此类有一个属性是InvocationHandler,此类还有四个静态属性，分别是Object的 equals,hashCode,toString 以及接口的实现方法Method.静态代码块会初始化这四个属性.此类有一个final方法为实现接口的重写方法.这个重写方法用InvocationHandler的属性值调用了invoke(this,method,args[]) 方法 ,其中this 是当前代理对象,method为接口的实现方法，args[]为重写方法的参数 .因此你可以再invoke里做任何操作。在调用代理对象的重写方法来达到调用目标对象重写方法的目的
+
+```java  
+
+public final class $Proxy0 extends Proxy implements Person
+{
+  private static Method m1;
+  private static Method m2;
+  private static Method m3;
+  private static Method m0;
+  
+  /**
+  *注意这里是生成代理类的构造方法，方法参数为InvocationHandler类型，看到这，是不是就有点明白
+  *为何代理对象调用方法都是执行InvocationHandler中的invoke方法，而InvocationHandler又持有一个
+  *被代理对象的实例，不禁会想难道是....？ 没错，就是你想的那样。
+  *
+  *super(paramInvocationHandler)，是调用父类Proxy的构造方法。
+  *父类持有：protected InvocationHandler h;
+  *Proxy构造方法：
+  *    protected Proxy(InvocationHandler h) {
+  *         Objects.requireNonNull(h);
+  *         this.h = h;
+  *     }
+  *
+  */
+  public $Proxy0(InvocationHandler paramInvocationHandler)
+    throws 
+  {
+    super(paramInvocationHandler);
+  }
+  
+  //这个静态块本来是在最后的，我把它拿到前面来，方便描述
+   static
+  {
+    try
+    {
+      //看看这儿静态块儿里面有什么，是不是找到了giveMoney方法。请记住giveMoney通过反射得到的名字m3，其他的先不管
+      m1 = Class.forName("java.lang.Object").getMethod("equals", new Class[] { Class.forName("java.lang.Object") });
+      m2 = Class.forName("java.lang.Object").getMethod("toString", new Class[0]);
+      m3 = Class.forName("proxy.Person").getMethod("giveMoney", new Class[0]);
+      m0 = Class.forName("java.lang.Object").getMethod("hashCode", new Class[0]);
+      return;
+    }
+    catch (NoSuchMethodException localNoSuchMethodException)
+    {
+      throw new NoSuchMethodError(localNoSuchMethodException.getMessage());
+    }
+    catch (ClassNotFoundException localClassNotFoundException)
+    {
+      throw new NoClassDefFoundError(localClassNotFoundException.getMessage());
+    }
+  }
+ 
+  /**
+  * 
+  *这里调用代理对象的giveMoney方法，直接就调用了InvocationHandler中的invoke方法，并把m3传了进去。
+  *this.h.invoke(this, m3, null);这里简单，明了。
+  *来，再想想，代理对象持有一个InvocationHandler对象，InvocationHandler对象持有一个被代理的对象，
+  *再联系到InvacationHandler中的invoke方法。嗯，就是这样。
+  */
+  public final void giveMoney()
+    throws 
+  {
+    try
+    {
+      this.h.invoke(this, m3, null);
+      return;
+    }
+    catch (Error|RuntimeException localError)
+    {
+      throw localError;
+    }
+    catch (Throwable localThrowable)
+    {
+      throw new UndeclaredThrowableException(localThrowable);
+    }
+  }
+
+  //注意，这里为了节省篇幅，省去了toString，hashCode、equals方法的内容。原理和giveMoney方法一毛一样。
+
+}
+```
+
+
+
+3. 实现JDK动态代理的方法有两种
+
+	```java  
+	public class MyInvocationInteceptor implements InvocationHandler {
+	    private MyInterface target;
+	
+	    public MyInvocationInteceptor(MyInterface myInterface) {
+	        this.target = myInterface;
+	    }
+	
+	    @Override
+	    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+	        System.out.println("开始执行MyInvocationInceptor方法");
+	        System.out.println("代理对象的类对象是"+proxy.getClass());
+	        System.out.println("代理对象代理的方法名是"+method.getName());
+	        System.out.println("开始执行dosomething方法");
+	        Object result=method.invoke(target,args);
+	        return result;
+	    }
+	}
+	
+	\\========================================================================
+	    
+	public class JdkDynamicProxyTest {
+	    public static void main(String[] args) throws NoSuchMethodException, IllegalAccessException, InvocationTargetException, InstantiationException {
+	        InvocationHandler it=new MyInvocationInteceptor((o1,o2)->{
+	            return "目标对象方法的返回值1";
+	        });
+	        Object proxyObject=Proxy.newProxyInstance(MyInterface.class.getClassLoader(),new Class[]{MyInterface.class},it);
+	        MyInterface proxyObject1=(MyInterface)proxyObject;
+	        String result=(String)proxyObject1.dosomething("1","a");
+	        System.out.println(result);
+	
+	
+	        Class<?> proxyClass=Proxy.getProxyClass(MyInterface.class.getClassLoader(),MyInterface.class);
+	        Constructor<?> constructor=proxyClass.getConstructor(InvocationHandler.class);
+	        MyInterface proxyObject2=(MyInterface) constructor.newInstance(new MyInvocationInteceptor((o1,o2)->{
+	            return "目标对象方法的返回值2";
+	        }));
+	        String result1=(String) proxyObject2.dosomething("1","b");
+	        System.out.println(result1);
+	
+	
+	
+	
+	    }
+	}
+	\\==========================================================================
+	    
+	```
+
+	
+
+##### 3.2.2 ciglib动态代理
 
 
 

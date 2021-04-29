@@ -456,11 +456,11 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 	4.1 初始标记 stop the world  多线程标记root 对象 
 
-	4.2 并发标记 不发生stop the world 应用程序继续运行  标记处所有存活对象 垃圾对象
+	4.2 并发标记 不发生stop the world 应用程序继续运行  多线程标记处所有存活对象 垃圾对象
 
-	4.3 重新标记  stop  the world 标记处并发标记过程当中后续运行过程产生的垃圾对象
+	4.3 重新标记  stop  the world 多线程标记处并发标记过程当中后续运行过程产生的垃圾对象
 
-	4.4 并发清除 回收所有标记的垃圾对象  
+	4.4 并发清除 多线程回收所有标记的垃圾对象  
 
 5. 缺点
 
@@ -478,9 +478,92 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 	
 
-	###  7.7排查GC问题,优化JVM
+	#### G1垃圾回收器 （JDK1.8出现）:垃圾优先的垃圾回收器
 
-	  -Xms 最小内存
+	1. 采用标记整理法，以及复制算法
+	
+	2.    面向服务端应用，针对具有大内存、多处理器的机器；
+	
+		   最主要的应用是为需要低GC延迟，并具有大堆的应用程序提供解决方案；
+	
+		   如：在堆大小约6GB或更大时，可预测的暂停时间可以低于0.5秒；
+	
+	3. G1独有概念
+	
+		2.1 region G1把内存分为多个不能连续的region 每个region可以是空白区， eden,survivor,old,humorous,用于存放指定年代的对象，空白区可以被用于任何类型的区域
+	
+		2.2 CollectedSet  可以回收垃圾的集合 保存需要进行垃圾回收的region的集合
+	
+		2.3 RememberedSet:当前region用来存放别的region对于当前region引用的集合，每个region都有
+	
+		2.4 -XX:+UseG1GC 采用G1垃圾回收器  -XX:+G1HeapRegionSize1M 设定region的大小
+	
+	4. 过程
+	
+		3.1  YGC
+	
+		1. 阶段1：根扫描
+			静态和本地对象被扫描
+	
+		2. 阶段2：更新RS
+			处理dirty card队列更新RS
+	
+		3. 阶段3：处理RS
+			检测从年轻代指向年老代的对象
+	
+		4. 阶段4：对象拷贝
+			拷贝存活的对象到survivor/old区域
+	
+		5. 阶段5：处理引用队列
+			软引用，弱引用，虚引用处理 
+	
+			
+	
+			
+	
+		 3.2  MIXGC
+	
+		1. 初始标记，与 cms一样，多线程并发标记Root 对象 STW
+	
+		2. 并发标记 与 cms一样 不发生STW ,多线程并发标记有用对象，垃圾对象
+	
+		3. 重新标记 与 cms一样发生STW，多线程并发标记未完成的标记
+	
+		4. 并发清除 与 cms一样，多线程 复制存活对象，清除垃圾对象
+	
+			
+	
+		3.3 FGC
+	
+		 当G1 MIXGC失败后，那么久采用SerialNo进行FGC
+	
+	
+	
+	
+	
+	#### CMS与G1对于三色标记法问题采用的解决方案
+	
+	1. CMS,G1都采用三色标记算法，来进行多次标记的 黑色（自身，自身属性完全被扫描的）白色（未被扫描）  灰色（自身扫描完成，自身属性未被扫描）
+	
+	2. 三色标记算法，会产生一个问题，就是白色标记对象，有可能在工作线程执行过程，未被扫描到，但是却被别的存活对象引用到。
+	
+	3. CMS这种采用增量算法，就是对于所有黑色对象进行重新扫描,再次标记.
+	
+	4. G1采用STAB 将所有白色标记对象存在栈中，重新标记过程，再次扫描标记所有白色对象 
+	
+		
+	
+	 
+	
+	
+	
+	
+	
+	##  8.排查GC问题,优化JVM
+	
+	 #### 8.1 JVM常用启动参数
+	
+	 -Xms 最小内存
 	
 	-Xmx 最大内存
 	
@@ -513,6 +596,82 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 	-XX:NumberOfGCLogFiles=5  设定GC日志的总量
 	
 	-XX:GCLogFileSize=20M  设定单个GC日志大小
+	
+	
+	
+	#### 8.2 JVM问题排查命令
+	
+	1. linux  top   查看所有进程资源消耗   -p [pid] 查看指定进程情况   H查看 进程内线程情况
+	
+	2. jdk  jstack [pid]  查看指定java 进程的线程执行情况  tid java线程的threadId  nid 内核线程Id prio java thread的优先级   os_prio 内核线程的优先级
+	
+	3. jinfo  [pid]   查看java进程 JVM的参数配置
+	
+		
+		
+	4. jstat -gc [pid]  [1000]ms  每个1000毫秒动态展示GC使用情况
+	
+		S0C：第一个幸存区的大小
+		S1C：第二个幸存区的大小
+		S0U：第一个幸存区的使用大小
+		S1U：第二个幸存区的使用大小
+		EC：伊甸园区的大小
+		EU：伊甸园区的使用大小
+		OC：老年代大小
+		OU：老年代使用大小
+		MC：方法区大小
+		MU：方法区使用大小
+		CCSC:压缩类空间大小
+		CCSU:压缩类空间使用大小
+		YGC：年轻代垃圾回收次数
+		YGCT：年轻代垃圾回收消耗时间
+		FGC：老年代垃圾回收次数
+		FGCT：老年代垃圾回收消耗时间
+		GCT：垃圾回收消耗总时间
+	
+	5. jmap -histo  [pid]  统计该进程所对象的大小
+	
+	6. jmap -dump:format=b,file=[]  [pid]
+	
+	7. jmap -heap [pid]  查看进程堆内存的大小
+	
+	8.  -XX:+HeapDumpOnOutOfMemoryError  进程Dump时，自动生成一个Dump文件,不指定位置的话那么会存放在classPath的目录下
+	
+	9.  jhat -J-mx100M  [dump文件名]  会启动一个http服务 访问他可以查询dump时的JVM内存情况,可以执行OQL语句 来查询具体对象的数量及详细信息.
+	
+	10. jconsole/jvisualvm 远程连接解决问题,前提设置通过JMX协议，需要监控的进程启动参数设置如下
+	
+	  ```shell
+	  java 
+	  -Djava.rmi.server.hostname=192.168.147.129
+	  -Dcom.sun.management.jmxremote 
+	  -Dcom.sun.management.jmxremote.port=11111 
+	  -Dcom.sun.management.jmxremote.authenticate=false 
+	  -Dcom.sun.management.jmxremote.ssl=false 
+	  ```
+	
+	
+	
+	11. arthas在线排查
+	
+		1. jvm 查看进程 JVM相关信息
+		2. thread 显示该进程内相关线程信息
+		3. dashboard  观察系统相关情况
+		4. heapdump 导出进程堆dump文件，之后使用jhat 命令可以进行分析
+		5. jad 反编译类文件
+		6. redefine  [class文件] 项目热部署 有条件限制 只能改方法实现  不能改方法名
+		7. sc  [类名] 查找类文件
+		8. watch [方法名]  -b -s "{params,returnObject}"  监控方法 执行参数，返回对象
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
 	
 	
 	

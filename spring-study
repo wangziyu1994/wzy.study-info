@@ -613,7 +613,892 @@ else if (mbd.isPrototype()) {
 		</bean>
 	```
 
+
+
+
+### 11.spring 创建Bean 构造器的匹配选择
+
+
+
+1. 第一次创建默认resolve/autowire属性都是false。都进不来,后续如果再进来 resolved就为true
+
+	```java 
+	//如果之前找到了匹配的构造器，实例化了相应对象，那么直接从对应BD的构造你缓存中取出对应构造器，进行实例化.第一次实例化默认都是进不来的
+			if (resolved) {
+				//自动注入构造器，可以按照参数类型
+				if (autowireNecessary) {
+					return autowireConstructor(beanName, mbd, null, null);
+				}
+				else {
+					return instantiateBean(beanName, mbd);
+				}
+			}
+	```
+
 	
+
+2. 如果设置了constructor-args那么就会进入autowire自动选择构造器的阶段,此过程的构造器选择：会先把所有这个BD的所有构造器按照参数个数排序,会根据传入的参数个数判断，选择对应的构造器。如果选择成功，那么久仿佛此BD的构造器缓存中，方便后续直接调用.不用再选择。（对于多例模式来说）
+
+	```java 
+	
+	
+	//根据各种条件（传入的constructorArgs是否为空，不为空则进入）
+			if (ctors != null || mbd.getResolvedAutowireMode() == AUTOWIRE_CONSTRUCTOR ||
+					mbd.hasConstructorArgumentValues() || !ObjectUtils.isEmpty(args)) {
+				return autowireConstructor(beanName, mbd, ctors, args);
+			}
+	
+	\\===============================================================================
+	    protected BeanWrapper autowireConstructor(
+				String beanName, RootBeanDefinition mbd, @Nullable Constructor<?>[] ctors, @Nullable Object[] explicitArgs) {
+	
+			return new ConstructorResolver(this).autowireConstructor(beanName, mbd, ctors, explicitArgs);
+		}
+	\\================================================================================
+	    //如果构造器选择成功,那么将构造器加入BeanDefinition的构造器缓存之中,方便下次直接调用
+				if (explicitArgs == null && argsHolderToUse != null) {
+					argsHolderToUse.storeCache(mbd, constructorToUse);
+				}
+	
+	```
+
+	
+
+3. 选择构造器的各种情况:
+
+	1. 传入的有constructor-args有构造参数条件:mbd.hasConstructorArgumentValues()
+
+		
+
+	2. 有@AutoWired注解修饰构造器,此前会通过context标签的componentScan的parse()方法注册一些内部BFPP,BPP的BD 其中一个重要的BPP就是AutowiredAnnotationBeanPostProcessor,此类继承了SmartInstantiationAwareBeanPostProcessor和MergedBeanDefinitionPostProcessor，并且重写了determineCandidateConstructors方法
+
+		```java  
+		 //转换AutowiredAnnotationBeanPostProcessor 为BeanDefinition
+				if (!registry.containsBeanDefinition(AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+					RootBeanDefinition def = new RootBeanDefinition(AutowiredAnnotationBeanPostProcessor.class);
+					def.setSource(source);
+					beanDefs.add(registerPostProcessor(registry, def, AUTOWIRED_ANNOTATION_PROCESSOR_BEAN_NAME));
+				}
+		
+		\\===========================================================================
+		    	protected Constructor<?>[] determineConstructorsFromBeanPostProcessors(@Nullable Class<?> beanClass, String beanName)
+					throws BeansException {
+		
+				if (beanClass != null && hasInstantiationAwareBeanPostProcessors()) {
+					for (SmartInstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().smartInstantiationAware) {
+						Constructor<?>[] ctors = bp.determineCandidateConstructors(beanClass, beanName);
+						if (ctors != null) {
+							return ctors;
+						}
+					}
+				}
+				return null;
+			}
+		    
+		
+		```
+
+	3. 
+
+
+
+
+
+
+
+### 12. spring实例化的策略模式(InstantiationStrategy接口)方法的重载，通过传参不同来调用不同的策略
+
+1.  SimpleInstantiationStrategy模式实例化普通Bean 
+	1. 根据无参构造器实例化
+	2. 根据有参构造器实例化
+	3. 根据工厂 factory-method实例化
+
+2.  CglibSubclassingInstantiationStrategy  CgLib模式实例化代理Bean  代理模式下也需要目标对象，因此需要目标对象的构造器
+	1. 根据无参构造器实例化代理类
+	2. 根据有参构造器实例化代理类
+
+
+
+### 13 .MergedBeanDefinitionPostProcessors的重写方法修改BD的信息，选出需要注入值的所有属性，和方法
+
+1. CommonAnnotationBeanPostProcessor是MBP的子接口，并且重写了它的实现方法，因此，在此会调用ABP的重写方法,此方法的第一个目的在于获取所有Bean(包括其所有父类，不包含静态) 的@postConstructor@preDestroy修饰的方法，并且后续设置BD当中，方便调用
+
+	
+
+```java 
+	public CommonAnnotationBeanPostProcessor() {
+		setOrder(Ordered.LOWEST_PRECEDENCE - 3);
+		setInitAnnotationType(PostConstruct.class);
+		setDestroyAnnotationType(PreDestroy.class);
+		ignoreResourceType("javax.xml.ws.WebServiceContext");
+	}
+
+//==========================================================================
+
+//执行MergedBeanDefinitionPostProcessors的重写方法
+synchronized (mbd.postProcessingLock) {
+			if (!mbd.postProcessed) {
+				try {
+					applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
+				}
+				catch (Throwable ex) {
+					throw new BeanCreationException(mbd.getResourceDescription(), beanName,
+							"Post-processing of merged bean definition failed", ex);
+				}
+				mbd.postProcessed = true;
+			}
+		}
+\\==============================================================================
+protected void applyMergedBeanDefinitionPostProcessors(RootBeanDefinition mbd, Class<?> beanType, String beanName) {
+		//判断当前Bean是否MergedBeanDefinitionPostProcessor ,如果是的话加入缓存并且，执行postProcessMergedBeanDefinition方法
+		for (MergedBeanDefinitionPostProcessor processor : getBeanPostProcessorCache().mergedDefinition) {
+			processor.postProcessMergedBeanDefinition(mbd, beanType, beanName);
+		}
+	}
+
+\\=============================================================================
+	@Override
+	public void postProcessMergedBeanDefinition(RootBeanDefinition beanDefinition, Class<?> beanType, String beanName) {
+		super.postProcessMergedBeanDefinition(beanDefinition, beanType, beanName);
+		InjectionMetadata metadata = findResourceMetadata(beanName, beanType, null);
+		metadata.checkConfigMembers(beanDefinition);
+	}
+
+\\===============================================================================
+@Override
+	public void postProcessMergedBeanDefinition(RootBeanDefinition beanDefinition, Class<?> beanType, String beanName) {
+		//获取此类以及所有父类的postConsturctor方法以及preDestroy方法，并且初始化为lifecycleMeta包装对象
+		LifecycleMetadata metadata = findLifecycleMetadata(beanType);
+    //将lifemeta相关信息注册到当前BD当中
+		metadata.checkConfigMembers(beanDefinition);
+	}
+
+\\======================================================================
+    	private LifecycleMetadata findLifecycleMetadata(Class<?> clazz) {
+		if (this.lifecycleMetadataCache == null) {
+			// Happens after deserialization, during destruction...
+			return buildLifecycleMetadata(clazz);
+		}
+		// Quick check on the concurrent map first, with minimal locking.
+		LifecycleMetadata metadata = this.lifecycleMetadataCache.get(clazz);
+		if (metadata == null) {
+			synchronized (this.lifecycleMetadataCache) {
+				metadata = this.lifecycleMetadataCache.get(clazz);
+				if (metadata == null) {
+					metadata = buildLifecycleMetadata(clazz);
+					this.lifecycleMetadataCache.put(clazz, metadata);
+				}
+				return metadata;
+			}
+		}
+		return metadata;
+	}
+
+\\==============================================================================
+	//遍历获取当前类以及他的所有父类的@postConstructor方法以及@preDestroy方法
+		do {
+			final List<LifecycleElement> currInitMethods = new ArrayList<>();
+			final List<LifecycleElement> currDestroyMethods = new ArrayList<>();
+
+			ReflectionUtils.doWithLocalMethods(targetClass, method -> {
+				if (this.initAnnotationType != null && method.isAnnotationPresent(this.initAnnotationType)) {
+					LifecycleElement element = new LifecycleElement(method);
+					currInitMethods.add(element);
+					if (logger.isTraceEnabled()) {
+						logger.trace("Found init method on class [" + clazz.getName() + "]: " + method);
+					}
+				}
+				if (this.destroyAnnotationType != null && method.isAnnotationPresent(this.destroyAnnotationType)) {
+					currDestroyMethods.add(new LifecycleElement(method));
+					if (logger.isTraceEnabled()) {
+						logger.trace("Found destroy method on class [" + clazz.getName() + "]: " + method);
+					}
+				}
+			});
+
+			initMethods.addAll(0, currInitMethods);
+			destroyMethods.addAll(currDestroyMethods);
+			targetClass = targetClass.getSuperclass();
+		}
+		while (targetClass != null && targetClass != Object.class);
+```
+
+
+
+<font color='red'>(@PostConstuctor后续会在初始化完成后applyBeanPostProcessorsBeforeInitialization的调用，会在后续)</font>
+
+```java  
+if (mbd == null || !mbd.isSynthetic()) {
+			wrappedBean = applyBeanPostProcessorsBeforeInitialization(wrappedBean, beanName);
+		}
+
+//========================================================================
+@Override
+	public Object applyBeanPostProcessorsBeforeInitialization(Object existingBean, String beanName)
+			throws BeansException {
+
+		Object result = existingBean;
+		for (BeanPostProcessor processor : getBeanPostProcessors()) {
+			Object current = processor.postProcessBeforeInitialization(result, beanName);
+			if (current == null) {
+				return result;
+			}
+			result = current;
+		}
+		return result;
+	}
+//========================================================================	
+@Override
+	public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+		LifecycleMetadata metadata = findLifecycleMetadata(bean.getClass());
+		try {
+			metadata.invokeInitMethods(bean, beanName);
+		}
+		catch (InvocationTargetException ex) {
+			throw new BeanCreationException(beanName, "Invocation of init method failed", ex.getTargetException());
+		}
+		catch (Throwable ex) {
+			throw new BeanCreationException(beanName, "Failed to invoke init method", ex);
+		}
+		return bean;
+	}
+```
+
+
+
+<font color='red'>@PreDestroy后续会在初始化完成后的调用)在容器的close()方法中的destroy()调用</font><font color='red'>DestructionAwareBeanPostProcessor的postProcessBeforeDestruction方法从而调用destory方法</font>
+
+```java  
+	@Override
+	public void destroy() {
+		if (!CollectionUtils.isEmpty(this.beanPostProcessors)) {
+			for (DestructionAwareBeanPostProcessor processor : this.beanPostProcessors) {
+				processor.postProcessBeforeDestruction(this.bean, this.beanName);
+			}
+		}
+```
+
+
+
+2. CommonAnnotationBeanPostProcessor 的重写方法不仅会完成postConstuctor,predestory注解的扫描，还会完成(包括其所有父类，不包含静态) @Resource注解的扫描，解析工作,完成之后将注解相关信息注册到BD当中
+
+	```java 
+		public void postProcessMergedBeanDefinition(RootBeanDefinition beanDefinition, Class<?> beanType, String beanName) {
+			//调用父类的postProcessMergedBeanDefinition方法,完成@PostConstructor,@PreDestory的解析工作
+			super.postProcessMergedBeanDefinition(beanDefinition, beanType, beanName);
+			//寻找@Resource注解
+			InjectionMetadata metadata = findResourceMetadata(beanName, beanType, null);
+	        	//将@Resource相关信息注册到对应BD当中
+			metadata.checkConfigMembers(beanDefinition);
+		}
+	\\=============================================================================
+	private InjectionMetadata findResourceMetadata(String beanName, final Class<?> clazz, @Nullable PropertyValues pvs) {
+			// Fall back to class name as cache key, for backwards compatibility with custom callers.
+			String cacheKey = (StringUtils.hasLength(beanName) ? beanName : clazz.getName());
+			// Quick check on the concurrent map first, with minimal locking.
+			InjectionMetadata metadata = this.injectionMetadataCache.get(cacheKey);
+			if (InjectionMetadata.needsRefresh(metadata, clazz)) {
+				synchronized (this.injectionMetadataCache) {
+					metadata = this.injectionMetadataCache.get(cacheKey);
+					if (InjectionMetadata.needsRefresh(metadata, clazz)) {
+						if (metadata != null) {
+							metadata.clear(pvs);
+						}
+						metadata = buildResourceMetadata(clazz);
+						this.injectionMetadataCache.put(cacheKey, metadata);
+					}
+				}
+			}
+			return metadata;
+		}
+	
+	
+	\\============================================================
+	```
+
+
+
+3. AutowiredAnnotationBeanPostProcessor 也是MBP的子接口，也重写了方法，因此也会再次调用。它的主要工作室完成类(包括其所有父类，不包含静态) 属性，方法的@Autowired/@Value的解析，并且也是将相关信息注册到BD当中去.
+
+	 ```java 
+		@Override
+		public void postProcessMergedBeanDefinition(RootBeanDefinition beanDefinition, Class<?> beanType, String beanName) {
+			//指定类中寻找所有的@AutoWired注解
+			InjectionMetadata metadata = findAutowiringMetadata(beanName, beanType, null);
+			//将@AutoWired注解修饰的元数据信息注册到BD当中
+			metadata.checkConfigMembers(beanDefinition);
+		}
+	\\================================================================================
+	    
+	    	private InjectionMetadata findAutowiringMetadata(String beanName, Class<?> clazz, @Nullable PropertyValues pvs) {
+			// Fall back to class name as cache key, for backwards compatibility with custom callers.
+			String cacheKey = (StringUtils.hasLength(beanName) ? beanName : clazz.getName());
+			// Quick check on the concurrent map first, with minimal locking.
+			InjectionMetadata metadata = this.injectionMetadataCache.get(cacheKey);
+			if (InjectionMetadata.needsRefresh(metadata, clazz)) {
+				synchronized (this.injectionMetadataCache) {
+					metadata = this.injectionMetadataCache.get(cacheKey);
+					if (InjectionMetadata.needsRefresh(metadata, clazz)) {
+						if (metadata != null) {
+							metadata.clear(pvs);
+						}
+						//获取类@AutoWired的元数据信息
+						metadata = buildAutowiringMetadata(clazz);
+						this.injectionMetadataCache.put(cacheKey, metadata);
+					}
+				}
+			}
+			return metadata;
+		}
+	\\============================================================
+	    
+	```
+
+	
+
+
+
+### 14.Spring 三级缓存解决Bean的循环依赖问题
+
+1. 为什么会产生循环依赖问题？
+
+	一个Bean的属性有另一个Bean,另一个Bean的属性也有此Bean.创建对象的时候都需要各自。导致死循环，无法完成循环依赖.
+
+2. 如何解决循环依赖问题？
+
+	1. 将实例化，初始化分开,在Bean创建的过程中先不考虑属性的赋值，先实例化，并且将自己提前暴露给其他对象引用.
+	2. 对象的引用的地址，全局不变。此时需要将半成品，成品对象区分，因为他们的用处不同，最终提供给用户使用的是成品对象，而在初始化阶段需要先用到半成品对象，之后再将半成品对象完成属性的赋值，所以可以设计两个map,两个map的key存放BeanName  一个map的value存放半成品对象，一个map的value存放成品对象.根据beanName 来获取，保证获取的对象引用地址相同。
+	3. 至此，普通对象的循环依赖问题已被两个map解决。但是spring当中会有代理对象。当一个对象被代理时，我们需要知道一个对象到底是不是代理对象，以及什么时候创建代理对象。
+	4. 代理对象具有被代理对象的所有功能，可以替代原对象。所以我们要先创建出完整的原对象，才能创建出代理对象。有了代理对象之后，就可以不需要再使用原对象了
+	5. 我们可以在生成半成品对象之后，传入一个匿名内部类。里面重写方法中判断此对象是不是需要代理，以及具体的代理过程。在需要代理对象的时候，直接调用匿名内部类的重写方法
+	6. 因此我们还需要一个map用来存放为了生成代理对象的匿名内部类。利用他的回调机制，完成对象的代理
+	7. 有的对象自身需要被代理。属性对象不需要被代理。而有的对象自身需要被代理，且属性对象也需要被代理。对于第一种情况，我们可以利用BeanPostProcessor的after方法，在此方法中，回调匿名内部类的重写方法.对于第二种情况，我们需要在属性值被赋值时，完成对象的代理.
+
+
+
+
+
+
+
+### 15.Spring Bean创建属性值的注入 xml标签形式注入（必须要有属性的set方法）
+
+#### 15.1 autowiredbyName
+
+1. 根据属性的名称去容器中获取对应对象,发现有符合的BeanName的Bean或者BD就进行赋值。
+
+	```java 
+	//开始Bean的实例化,获取要填充的属性值
+	populateBean(beanName, mbd, instanceWrapper);
+	//================================================================================
+	//获取BD当中的property与value
+			PropertyValues pvs = (mbd.hasPropertyValues() ? mbd.getPropertyValues() : null);
+	        //获取bean的注入方式，可以是byname,bytype,byconstuctor,
+			int resolvedAutowireMode = mbd.getResolvedAutowireMode();
+			if (resolvedAutowireMode == AUTOWIRE_BY_NAME || resolvedAutowireMode == AUTOWIRE_BY_TYPE) {
+				//包装一个获取的PropertyValues对象
+				MutablePropertyValues newPvs = new MutablePropertyValues(pvs);
+				// Add property values based on autowire by name if applicable.
+				//如果指定是byName的话采用byName的方式获取该属性值
+				if (resolvedAutowireMode == AUTOWIRE_BY_NAME) {
+					//具体注入步骤
+					autowireByName(beanName, mbd, bw, newPvs);
+				}
+				// Add property values based on autowire by type if applicable.
+				//如果指定是byType的话采用byType的方式获取该属性值
+				if (resolvedAutowireMode == AUTOWIRE_BY_TYPE) {
+					autowireByType(beanName, mbd, bw, newPvs);
+				}
+				pvs = newPvs;
+			}
+	//================================================================================
+	//获取非基本类型，非基本类型的包装和数组
+			String[] propertyNames = unsatisfiedNonSimpleProperties(mbd, bw);
+			for (String propertyName : propertyNames) {
+				if (containsBean(propertyName)) {
+					//判断Bean是否存在或BD是否存在(如果存在直接获取，不存在则开始doCreatBean)
+					Object bean = getBean(propertyName);
+					pvs.add(propertyName, bean);
+					//如果Bean之间有依赖关系的话，则缓存中记录这种依赖关系，方便下次调用
+					registerDependentBean(propertyName, beanName);
+					if (logger.isTraceEnabled()) {
+						logger.trace("Added autowiring by name from bean name '" + beanName +
+								"' via property '" + propertyName + "' to bean named '" + propertyName + "'");
+					}
+				}
+				else {
+					if (logger.isTraceEnabled()) {
+						logger.trace("Not autowiring property '" + propertyName + "' of bean '" + beanName +
+								"' by name: no matching bean found");
+					}
+				}
+	
+	
+	
+	```
+
+	
+
+#### 15.2 autowiredbyType
+
+1. 根据属性的类型去获取对应对象，发现有对应类型的Bean和BD就进行注入
+
+2. 注意如果是集合类型的话，他会把容器中所有符合类型的集合注入，候选者集合是一个string,Object的map
+
+	Object里面是候选Bean。
+
+	string 存储的属性名称，之后会将候选者Object赋值给对应的属性。属性值的类型和候选者集合Object的类型匹配的话，那么就会赋值成功
+
+	```java 
+	 //获取自定义类型转换器，如果为null的话自动设置Bean的包装类型BW
+			TypeConverter converter = getCustomTypeConverter();
+			if (converter == null) {
+				converter = bw;
+			}
+	
+			Set<String> autowiredBeanNames = new LinkedHashSet<>(4);
+			//获取非基本类型，非基本类型的包装和他们的数组
+			String[] propertyNames = unsatisfiedNonSimpleProperties(mbd, bw);
+			for (String propertyName : propertyNames) {
+				try {
+					PropertyDescriptor pd = bw.getPropertyDescriptor(propertyName);
+					// Don't try autowiring by type for type Object: never makes sense,
+					// even if it technically is a unsatisfied, non-simple property.
+					//排除Object的类型属性
+					if (Object.class != pd.getPropertyType()) {
+						//获取属性的set方法
+						MethodParameter methodParam = BeanUtils.getWriteMethodParameter(pd);
+						// Do not allow eager init for type matching in case of a prioritized post-processor.
+						boolean eager = !(bw.getWrappedInstance() instanceof PriorityOrdered);
+						//创建依赖描述符
+						DependencyDescriptor desc = new AutowireByTypeDependencyDescriptor(methodParam, eager);
+						//寻找对应的属性值
+						Object autowiredArgument = resolveDependency(desc, beanName, autowiredBeanNames, converter);
+						if (autowiredArgument != null) {
+							pvs.add(propertyName, autowiredArgument);
+						}
+						//注册依赖关系
+						for (String autowiredBeanName : autowiredBeanNames) {
+							registerDependentBean(autowiredBeanName, beanName);
+							if (logger.isTraceEnabled()) {
+								logger.trace("Autowiring by type from bean name '" + beanName + "' via property '" +
+										propertyName + "' to bean named '" + autowiredBeanName + "'");
+							}
+						}
+						autowiredBeanNames.clear();
+					}
+	               
+	\\================================================================================
+	    //默认普通类型的属性进入此方法
+				if (result == null) {
+					result = doResolveDependency(descriptor, requestingBeanName, autowiredBeanNames, typeConverter);
+				}
+	\\=======================================================================
+	    	//如果集合类型是一个用户自定义类型返回
+				Object multipleBeans = resolveMultipleBeans(descriptor, beanName, autowiredBeanNames, typeConverter);
+				if (multipleBeans != null) {
+					return multipleBeans;
+				}
+	
+				//按类型寻找容器对应的Bean
+				Map<String, Object> matchingBeans = findAutowireCandidates(beanName, type, descriptor);
+				if (matchingBeans.isEmpty()) {
+					if (isRequired(descriptor)) {
+						raiseNoMatchingBeanFound(type, descriptor.getResolvableType(), descriptor);
+					}
+					return null;
+				}
+	                
+	                
+	\\================================================================================      	//2. 类型查找：本质上递归调用beanFactory#beanNamesForType。先匹配工厂，再匹配bd。找到所有类型匹配的Bean的名称
+			String[] candidateNames = BeanFactoryUtils.beanNamesForTypeIncludingAncestors(
+					this, requiredType, true, descriptor.isEager());
+	                
+	                for (String candidate : candidateNames) {
+				if (!isSelfReference(beanName, candidate) && isAutowireCandidate(candidate, descriptor)) {
+					//把获取到符合Bean类型的BD的名字传入，并且返回候选者对象
+					addCandidateEntry(result, candidate, descriptor, requiredType);
+				}
+			}
+	                \\=================================================================
+	                    //获取到匹配类型的所有后选择Bean，加入候选者集合
+				else {
+				//获取到匹配类型的所有后选择Bean，加入候选者集合
+				candidates.put(candidateName, getType(candidateName));
+			}
+	    
+	```
+
+	
+
+###16 @Autowired注解修饰属性的注入(@Resource类似，但是另一个CommonBPP注入处理的)，@Autowired可以修饰属性，注入属性，也可以修饰方法，将获取方法参数，在调用方法。
+
+1. 在配置文件autowired 赋值以后，会再一次遍历InnstationBeanProcessor接口的实现类，并且会调用他们的实现方法pocessProperties()方法。而AnnotationBPP恰好是该接口的实现类，并且会他的实现方法。完成了对象被@AutoWired注解修饰的属性的赋值
+
+	```java 
+	//如果含有InstantiationAwareBeanPostProcessor的话，则嗲用该重写方法,此处如果开启注解配置的话，会通过
+	//AutoWiredAnnotationBPP的重写方法，完成@Autowird属性的赋值，因为此前的一个BFPP已经获取了被他修饰的属性
+	for (InstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().instantiationAware) {
+	    PropertyValues pvsToUse = bp.postProcessProperties(pvs, bw.getWrappedInstance(), beanName);
+	    if (pvsToUse == null) {
+	        if (filteredPds == null) {
+	            filteredPds = filterPropertyDescriptorsForDependencyCheck(bw, mbd.allowCaching);
+	        }
+	        pvsToUse = bp.postProcessPropertyValues(pvs, filteredPds, bw.getWrappedInstance(), beanName);
+	        if (pvsToUse == null) {
+	            return;
+	        }
+	    }
+	    pvs = pvsToUse;
+	}
+	}
+	
+	\\==========================================================================
+	    public PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName) {
+	    InjectionMetadata metadata = findAutowiringMetadata(beanName, bean.getClass(), pvs);
+	    try {
+	        //为@autowired注解修饰的属性赋值
+	        metadata.inject(bean, beanName, pvs);
+	    }
+	    catch (BeanCreationException ex) {
+	        throw ex;
+	    }
+	    catch (Throwable ex) {
+	        throw new BeanCreationException(beanName, "Injection of autowired dependencies failed", ex);
+	    }
+	    return pvs;
+	}
+	\\==============================================================================
+	    Object value;
+	try {
+	    //寻找注解修饰属性的值,注意此处就是配置文件按照配置文件注入的：先ByType注入，如果不存在报错，如果发现多个再根据beanName去匹配
+	    value = beanFactory.resolveDependency(desc, beanName, autowiredBeanNames, typeConverter);
+	}
+	catch (BeansException ex) {
+	    throw new UnsatisfiedDependencyException(null, beanName, new InjectionPoint(field), ex);
+	}
+	
+	```
+
+	
+
+
+
+
+
+
+
+### 17.Spring标签形式的属性赋值
+
+1. 获取AutoWiredByName/AutowiredByType 之前获取的Bean或者 BD
+
+```java 
+//获取对象属性的值查找
+Object resolvedValue = valueResolver.resolveValueIfNecessary(pv, originalValue);
+```
+
+2. 如果是RunTimeReference 则从BeanFactory getBean(name)
+
+	```java 
+	if (value instanceof RuntimeBeanReference) {
+				RuntimeBeanReference ref = (RuntimeBeanReference) value;
+				return resolveReference(argName, ref);
+			}
+	\\============================================================================
+	else {
+	resolvedName = String.valueOf(doEvaluate(ref.getBeanName()));
+	bean = this.beanFactory.getBean(resolvedName);
+	}
+	this.beanFactory.registerDependentBean(resolvedName, this.beanName);
+	```
+
+	
+
+3. 此时对value 有一个非常多的判断包括LIST /MAP 等等。。。。。。不同值的类型 有不同的处理方式
+
+
+
+
+
+### 18.总结Spring 创建Bean对象的阶段（最重要）
+
+#### 1. doCreatBean()  
+
+1. 从一级缓存中去获取，如果存在直接返回。
+
+2. 如果不存在，开始正式的创建流程。
+
+	```java 
+	//开始Bean的实例化
+	sharedInstance = getSingleton(beanName, () -> {
+	    try {
+	        return createBean(beanName, mbd, args);
+	    }
+	    catch (BeansException ex) {
+	        // Explicitly remove instance from singleton cache: It might have been put there
+	        // eagerly by the creation process, to allow for circular reference resolution.
+	        // Also remove any beans that received a temporary reference to the bean.
+	        destroySingleton(beanName);
+	        throw ex;
+	    }
+	});
+	```
+
+	
+
+#### 2.Bean的创建
+
+#####1.Bean的实例化
+
+```java 
+	Object beanInstance = doCreateBean(beanName, mbdToUse, args);
+//====================================================================================
+//（1）.创建bean包装类BealWrapper，这段代码执行结束，说明bean已经构建完成，在堆上创建了实例
+			instanceWrapper = createBeanInstance(beanName, mbd, args);
+//====================================================================================
+
+```
+
+
+
+##### 2.Bean的初始化
+
+###### 1.首先发现@AutoWired注解，@Resource,@PostConstructor@PostBean修饰的属性或者方法,并且暂存到缓存中去.
+
+```java 
+//执行MergedBeanDefinitionPostProcessors的重写方法,非常重要,完成各类注解的解析工作  @AutoWired,@Resource,@PostConstructor....
+		synchronized (mbd.postProcessingLock) {
+			if (!mbd.postProcessed) {
+				try {
+					applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
+				}
+				catch (Throwable ex) {
+					throw new BeanCreationException(mbd.getResourceDescription(), beanName,
+							"Post-processing of merged bean definition failed", ex);
+				}
+				mbd.postProcessed = true;
+			}
+		}
+```
+
+
+
+
+
+###### 2.提前暴露对象，解决循环依赖问题
+
+```java 
+//这里非常重要，这里就是传入一个匿名内部类。内部类中含有一个判断对象是否需要动态代理的回调方法。
+		boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&
+				isSingletonCurrentlyInCreation(beanName));
+		if (earlySingletonExposure) {
+			if (logger.isTraceEnabled()) {
+				logger.trace("Eagerly caching bean '" + beanName +
+						"' to allow for resolving potential circular references");
+			}
+			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
+		}
+```
+
+
+
+######3.提前暴露对象解决循环依赖问题
+
+```java 
+//这里非常重要，这里就是传入一个匿名内部类。内部类中含有一个判断对象是否需要动态代理的回调方法。
+		boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&
+				isSingletonCurrentlyInCreation(beanName));
+		if (earlySingletonExposure) {
+			if (logger.isTraceEnabled()) {
+				logger.trace("Eagerly caching bean '" + beanName +
+						"' to allow for resolving potential circular references");
+			}
+			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
+		}
+```
+
+
+
+
+
+###### 4.开始Bean的属性值的赋值
+
+```java 
+//开始Bean的实例化,获取要填充的属性值
+			populateBean(beanName, mbd, instanceWrapper);
+```
+
+
+
+##### 4.1发现所有符合条件的属性值，先以xml标签的值为主，如果标签是自动装配类型的话，则按类型获取属性值，或者按名称获取属性值.
+
+```java 
+PropertyValues pvs = (mbd.hasPropertyValues() ? mbd.getPropertyValues() : null);//获取BD当中的property与value
+PropertyValues pvs = (mbd.hasPropertyValues() ? mbd.getPropertyValues() : null);
+//获取bean的注入方式，可以是byname,bytype,byconstuctor,
+int resolvedAutowireMode = mbd.getResolvedAutowireMode();
+if (resolvedAutowireMode == AUTOWIRE_BY_NAME || resolvedAutowireMode == AUTOWIRE_BY_TYPE) {
+    //包装一个获取的PropertyValues对象
+    MutablePropertyValues newPvs = new MutablePropertyValues(pvs);
+    // Add property values based on autowire by name if applicable.
+    //如果指定是byName的话采用byName的方式获取该属性值
+    if (resolvedAutowireMode == AUTOWIRE_BY_NAME) {
+        //具体注入步骤
+        autowireByName(beanName, mbd, bw, newPvs);
+    }
+    // Add property values based on autowire by type if applicable.
+    //如果指定是byType的话采用byType的方式获取该属性值
+    if (resolvedAutowireMode == AUTOWIRE_BY_TYPE) {
+        autowireByType(beanName, mbd, bw, newPvs);
+    }
+    pvs = newPvs;
+}
+```
+
+
+
+##### 4.2发现被@AutoWired @Qualified修饰的属性的值,此自动装配注解的属性之前已经完成了发现，现在主要是通过AutoWiredBeanPostProcessor进行符合条件的属性值，以及属性值的注入。
+
+```java 
+//如果开启注解功能，自动初始化一个空的PropertyValue
+if (hasInstAwareBpps) {
+    if (pvs == null) {
+        pvs = mbd.getPropertyValues();
+    }
+    //如果含有InstantiationAwareBeanPostProcessor的话，则嗲用该重写方法,此处如果开启注解配置的话，会通过
+    //AutoWiredAnnotationBPP的重写方法，完成@Autowird属性的赋值，因为此前的一个BFPP已经获取了被他修饰的属性
+    for (InstantiationAwareBeanPostProcessor bp : getBeanPostProcessorCache().instantiationAware) {
+        PropertyValues pvsToUse = bp.postProcessProperties(pvs, bw.getWrappedInstance(), beanName);
+        if (pvsToUse == null) {
+            if (filteredPds == null) {
+                filteredPds = filterPropertyDescriptorsForDependencyCheck(bw, mbd.allowCaching);
+            }
+            pvsToUse = bp.postProcessPropertyValues(pvs, filteredPds, bw.getWrappedInstance(), beanName);
+            if (pvsToUse == null) {
+                return;
+            }
+        }
+        pvs = pvsToUse;
+    }
+}
+```
+
+
+
+##### 4.3填充属性,此过程按属性的类型，把之前标签配置的值，进行查找转换，并且利用set方法的反射最终赋值给实例化的对象，深拷贝一个PropertyValue 。防止后续对值的转换影响到原有值。
+
+```java 
+if (pvs != null) {
+    applyPropertyValues(beanName, mbd, bw, pvs);
+}
+\\====================================================================================
+    ph.setValue(valueToApply);
+\\====================================================================================
+    ReflectionUtils.makeAccessible(writeMethod);
+writeMethod.invoke(getWrappedInstance(), value);
+
+```
+
+
+
+##### 4.4 填充属性值之后  
+
+1. 调用实现了BeanNameWare,BeanClassLoaderAware,BeanFactoryAware接口的方法，将beanName,classLoader,beanFactory的名称传递给自身.
+
+```java 
+//调用初始化方法
+exposedObject = initializeBean(beanName, exposedObject, mbd);
+//调用aware接口的实现方法,获取BeanName,BeanFactory,BeanClassLoader
+		if (System.getSecurityManager() != null) {
+			AccessController.doPrivileged((PrivilegedAction<Object>) () -> {
+				invokeAwareMethods(beanName, bean);
+				return null;
+			}, getAccessControlContext());
+		}
+		else {
+			invokeAwareMethods(beanName, bean);
+		}
+
+
+
+```
+
+2. init-Method之前,调用前置处理BPP(比如CommonBPP 的@PostConstructor修饰的方法)
+
+	```java 
+	//初始化之前，调用所哟前置处理方法
+	Object wrappedBean = bean;
+			if (mbd == null || !mbd.isSynthetic()) {
+				wrappedBean = applyBeanPostProcessorsBeforeInitialization(wrappedBean, beanName);
+			}
+	
+	```
+
+	
+
+3. init-Method方法 如果之前已有@POSTcoStructor修饰的方法 那么此过程不会调用。
+
+	在此过程之前还有个一个对实现InitalizingBean接口Bean的afterPropertiesSet的调用。最后一个改变Bean的属性值
+
+	```java 
+	try {
+	    invokeInitMethods(beanName, wrappedBean, mbd);
+	}
+	catch (Throwable ex) {
+	    throw new BeanCreationException(
+	        (mbd != null ? mbd.getResourceDescription() : null),
+	        beanName, "Invocation of init method failed", ex);
+	}
+	
+	
+	if (isInitializingBean && (mbd == null || !mbd.isExternallyManagedInitMethod("afterPropertiesSet"))) {
+				if (logger.isTraceEnabled()) {
+					logger.trace("Invoking afterPropertiesSet() on bean with name '" + beanName + "'");
+				}
+				if (System.getSecurityManager() != null) {
+					try {
+						AccessController.doPrivileged((PrivilegedExceptionAction<Object>) () -> {
+							((InitializingBean) bean).afterPropertiesSet();
+							return null;
+						}, getAccessControlContext());
+					}
+					catch (PrivilegedActionException pae) {
+						throw pae.getException();
+					}
+				}
+				else {
+					((InitializingBean) bean).afterPropertiesSet();
+				}
+			}
+	
+	
+	if (mbd != null && bean.getClass() != NullBean.class) {
+				String initMethodName = mbd.getInitMethodName();
+				if (StringUtils.hasLength(initMethodName) &&
+						!(isInitializingBean && "afterPropertiesSet".equals(initMethodName)) &&
+						!mbd.isExternallyManagedInitMethod(initMethodName)) {
+					invokeCustomInitMethod(beanName, bean, mbd);
+				}
+			}
+	```
+
+4. 调用后置处理BPP方法
+
+	```java 
+	//调用BPP后置处理方法
+	if (mbd == null || !mbd.isSynthetic()) {
+	    wrappedBean = applyBeanPostProcessorsAfterInitialization(wrappedBean, beanName);
+	}
+	```
+
+
+
+
+
+
+
+3.解决需要动态代理Bean问题
+
+
 
 1,spring IOC
 xml配置,注解配置
