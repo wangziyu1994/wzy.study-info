@@ -16,15 +16,18 @@ LongAddr 当并发非常大时,分为数组，每个数组单独进行自选锁�
 问题：可能产生ABA问题 加入版本号解决. new AtomicStampReference(变量值,版本号);
 问题：并发大时CPU负载高。影响性能.
 
-
 2.3 synchronized 代码块 方法
 并发数小的时候CAS自选锁,并发大的时候重量级锁.
+
+wait() notify()  notifyAll()  notify()会唤醒进入wait等待队列池的随机一个线程
 
 2.4 ReenTrantLock
 可以完全替代synchronized
 不同点: 可以设置公平锁,非公平锁
 可以设置interrupt中断线程
 可以设置tryLock(超时时间) 
+
+condition.await()  condition.signal()  会唤醒进入指定等待队列池中的一个线程
 
 2.5栅栏:
 CountDownLatch CyclicBarrier  Phrase

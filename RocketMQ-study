@@ -1,0 +1,124 @@
+## 1.RocketMQ-namesrv
+
+1.初始化controller,里面初始化  namesrvserver,nettyserver ，之后启动controller 对外接收Client的请求
+
+```java 
+//初始化namesrcController  这是个nettyserver  接收nettyclient的请求
+NamesrvController controller = createNamesrvController(args);
+//启动controller,initalize controller
+start(controller);
+\\=========================================================
+      //创建namesrv,nettyserverconfig 对象
+        final NamesrvConfig namesrvConfig = new NamesrvConfig();
+        final NettyServerConfig nettyServerConfig = new NettyServerConfig();
+        nettyServerConfig.setListenPort(9876);
+        //如果main方法参数 -c 指定了配置文件，使用配置文件的配置
+\\================================================
+      boolean initResult = controller.initialize();
+        if (!initResult) {
+            controller.shutdown();
+            System.exit(-3);
+        }
+
+        Runtime.getRuntime().addShutdownHook(new ShutdownHookThread(log, new Callable<Void>() {
+            @Override
+            public Void call() throws Exception {
+                controller.shutdown();
+                return null;
+            }
+        }));
+       //controller start方法启动namesrv
+        controller.start();
+\\==================================================================
+    
+```
+
+
+
+
+
+## 2.RocketMQ-broker
+
+1.初始化controller  ,里面初始化 nettyServer,nettyClient ,之后启动controller ，里面启动nettyserver
+
+```java 
+ //创建并且启动controller
+        start(createBrokerController(args));
+\\============================================================================
+      if (this.messageStore != null) {
+            this.messageStore.start();
+        }
+
+        if (this.remotingServer != null) {
+            this.remotingServer.start();
+        }
+
+        if (this.fastRemotingServer != null) {
+            this.fastRemotingServer.start();
+        }
+
+        if (this.fileWatchService != null) {
+            this.fileWatchService.start();
+        }
+
+        if (this.brokerOuterAPI != null) {
+            this.brokerOuterAPI.start();
+        }
+
+        if (this.pullRequestHoldService != null) {
+            this.pullRequestHoldService.start();
+        }
+
+        if (this.clientHousekeepingService != null) {
+            this.clientHousekeepingService.start();
+        }
+
+        if (this.filterServerManager != null) {
+            this.filterServerManager.start();
+        }
+
+        if (!messageStoreConfig.isEnableDLegerCommitLog()) {
+            startProcessorByHa(messageStoreConfig.getBrokerRole());
+            handleSlaveSynchronize(messageStoreConfig.getBrokerRole());
+            this.registerBrokerAll(true, false, true);
+        }
+
+```
+
+
+
+
+
+##3.RocketMQ-Consumer
+
+
+
+
+
+##1.RocketMQ消费者源码流程
+
+##### 1.初始化DefaultPushConsumer---->初始化了DefaultMQPushConsumerImpl
+
+#####2. **defaultPullConsumer.start()--------->this.defaultMQPullConsumerImpl.start();(典型的装饰者模式)**
+
+1. 进入switch(this.serviceState)选择结构，this.serviceState初始默认都是Createjust
+
+2. this.checkConfig() 核查配置信息
+3. this.this.copySubscription();复制订阅
+4. 初始化连接工厂 mqClientFactory
+5. 重新负载均衡 rehance
+6. 获取消息 newPullApiWrapper
+7. 判断是否由客户端维护偏移量，或者是服务端维护偏移量
+8. 判断是顺序消费，还是并发消费消息 orderly  or concurrently
+9. 向namesrv注册自身相关信息registerConsumer  如果成功service.state为running
+
+
+
+
+
+
+
+
+
+## 2.PullRequest详解
+

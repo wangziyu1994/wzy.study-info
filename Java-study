@@ -305,7 +305,7 @@
 
 1.4 虚引用: 开辟在堆外的空间之内,任何时候都有可能被GC回收,在回收之前会被放入队列里面.
 
-### 3.代理
+##3.代理
 
 #### 3.1 静态代理
 
@@ -452,13 +452,656 @@ public final class $Proxy0 extends Proxy implements Person
 	    
 	```
 
+	3.2.1.1 源码分析
+	
+	
+	
+	```java 
+	Class<?> cl = getProxyClass0(loader, intfs);
+	//==================================================
+	private static Class<?> getProxyClass0(ClassLoader loader,
+	                                       Class<?>... interfaces) {
+	    if (interfaces.length > 65535) {
+	        throw new IllegalArgumentException("interface limit exceeded");
+	    }
+	
+	    // If the proxy class defined by the given loader implementing
+	    // the given interfaces exists, this will simply return the cached copy;
+	    // otherwise, it will create the proxy class via the ProxyClassFactory
+	    return proxyClassCache.get(loader, interfaces);
+	}
+	//======================================
+	try {
+	    value = Objects.requireNonNull(valueFactory.apply(key, parameter));
+	} final
+	    //=======================================
+	
+	    //核心代码块 生成代理类的字节码文件，并且加载到内存成为对应的Class对象
+	    @Override
+	    public Class<?> apply(ClassLoader loader, Class<?>[] interfaces) {
+	
+	    Map<Class<?>, Boolean> interfaceSet = new IdentityHashMap<>(interfaces.length);
+	    for (Class<?> intf : interfaces) {
+	        /*
+	                 * Verify that the class loader resolves the name of this
+	                 * interface to the same Class object.
+	                 */
+	        Class<?> interfaceClass = null;
+	        try {
+	            interfaceClass = Class.forName(intf.getName(), false, loader);
+	        } catch (ClassNotFoundException e) {
+	        }
+	        if (interfaceClass != intf) {
+	            throw new IllegalArgumentException(
+	                intf + " is not visible from class loader");
+	        }
+	        /*
+	                 * Verify that the Class object actually represents an
+	                 * interface.
+	                 */
+	        if (!interfaceClass.isInterface()) {
+	            throw new IllegalArgumentException(
+	                interfaceClass.getName() + " is not an interface");
+	        }
+	        /*
+	                 * Verify that this interface is not a duplicate.
+	                 */
+	        if (interfaceSet.put(interfaceClass, Boolean.TRUE) != null) {
+	            throw new IllegalArgumentException(
+	                "repeated interface: " + interfaceClass.getName());
+	        }
+	    }
+	
+	    String proxyPkg = null;     // package to define proxy class in
+	    int accessFlags = Modifier.PUBLIC | Modifier.FINAL;
+	
+	    /*
+	             * Record the package of a non-public proxy interface so that the
+	             * proxy class will be defined in the same package.  Verify that
+	             * all non-public proxy interfaces are in the same package.
+	             */
+	    for (Class<?> intf : interfaces) {
+	        int flags = intf.getModifiers();
+	        if (!Modifier.isPublic(flags)) {
+	            accessFlags = Modifier.FINAL;
+	            String name = intf.getName();
+	            int n = name.lastIndexOf('.');
+	            String pkg = ((n == -1) ? "" : name.substring(0, n + 1));
+	            if (proxyPkg == null) {
+	                proxyPkg = pkg;
+	            } else if (!pkg.equals(proxyPkg)) {
+	                throw new IllegalArgumentException(
+	                    "non-public interfaces from different packages");
+	            }
+	        }
+	    }
+	
+	    if (proxyPkg == null) {
+	        // if no non-public proxy interfaces, use com.sun.proxy package
+	        proxyPkg = ReflectUtil.PROXY_PACKAGE + ".";
+	    }
+	
+	    /*
+	             * Choose a name for the proxy class to generate.
+	             */
+	    long num = nextUniqueNumber.getAndIncrement();
+	
+	    //代理类的类名
+	    String proxyName = proxyPkg + proxyClassNamePrefix + num;
+	
+	    /*
+	             * Generate the specified proxy class.
+	             */
+	    byte[] proxyClassFile = ProxyGenerator.generateProxyClass(
+	        proxyName, interfaces, accessFlags);
+	    try {
+	        return defineClass0(loader, proxyName,
+	                            proxyClassFile, 0, proxyClassFile.length);
+	    } catch (ClassFormatError e) {
+	        /*
+	                 * A ClassFormatError here means that (barring bugs in the
+	                 * proxy class generation code) there was some other
+	                 * invalid aspect of the arguments supplied to the proxy
+	                 * class creation (such as virtual machine limitations
+	                 * exceeded).
+	                 */
+	        throw new IllegalArgumentException(e.toString());
+	    }
+	}
+	}
+	```
+	
+	总结：jdk  Proxy.newProxyInstance 中创建出一个字节码对象，该对象继承Proxy类 并且有一个属性时用户设置的InvocationIntercepter对象.
+	
+	他的静态属性是Object的所有方法以及代理的目标方法，他的静态代码块会将这些方法对象反射成Method对象。他有所有和目标对象同名的方法。并且里面会调用this.invocationInterceptor.invoke(代理对象,参数,null)
+	
+	方法，就是进入invocationIntercepter的invoke方法。 invoke方法会实际调用目标对象的方法逻辑。
+	
+	
+	
 	
 
 ##### 3.2.2 ciglib动态代理
 
+```java 
+//创建增强器对象，里面预设了一系列缓存        
+Enhancer enhancer=new Enhancer();
+//设置目标类
+enhancer.setSuperclass(AInterface.class);
+//设置回调
+enhancer.setCallback(interceptor);
+//核心创建出实际代理对象
+AInterface aInterface=(AInterface)enhancer.create();
+aInterface.function1("aInterface");
+```
 
 
 
 
 
+##4.AQS源码分析
+
+AQS-------->Sync------------>fairSync/noFairSync
+
+1.首先lock()方法  调用sync 的lock()方法 sync默认实现是fairsysnc 可以指定为nofairsync
+
+```java 
+ public void lock() {
+        sync.lock();
+    }
+//================================fairSync
+     final void lock() {
+            acquire(1);
+        }
+//================================noFairSync
+ final void lock() {
+            if (compareAndSetState(0, 1))
+                setExclusiveOwnerThread(Thread.currentThread());
+            else
+                acquire(1);
+        }
+
+//=================================
+```
+
+
+
+
+
+
+
+2.公平锁，非公平锁都会进入 AQS的acquire方法
+
+```JAVA 
+//=============================== AQS的 acquire
+   public final void acquire(int arg) {
+        if (!tryAcquire(arg) &&
+            acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
+            selfInterrupt();
+    }
+
+```
+
+
+
+3.非公平锁 获取锁的过程不会考虑自己是否在队列以及是否要排队,但是在两次自旋获取失败之后，被加入队列之后，后续就和公平锁一样了。
+
+```java 
+   protected final boolean tryAcquire(int acquires) {
+            return nonfairTryAcquire(acquires);
+        }
+//================================== 
+final boolean nonfairTryAcquire(int acquires) {
+            final Thread current = Thread.currentThread();
+            int c = getState();
+            if (c == 0) {
+                if (compareAndSetState(0, acquires)) {
+                    setExclusiveOwnerThread(current);
+                    return true;
+                }
+            }
+            else if (current == getExclusiveOwnerThread()) {
+                int nextc = c + acquires;
+                if (nextc < 0) // overflow
+                    throw new Error("Maximum lock count exceeded");
+                setState(nextc);
+                return true;
+            }
+            return false;
+        }
+```
+
+
+
+4.公平锁的tryAcquire方法
+
+​    1.判断锁是否被占有，没占有的话判断是否处于竞争状态，有的话判断是否是重入
+
+```java 
+//============================ fairSync的tryAcquire方法========
+protected final boolean tryAcquire(int acquires) {
+            final Thread current = Thread.currentThread();
+            int c = getState();
+     //为0进入
+            if (c == 0) {
+                if (!hasQueuedPredecessors() &&
+                    compareAndSetState(0, acquires)) {
+                    setExclusiveOwnerThread(current);
+                    return true;
+                }
+            }
+    //如果之前持有锁，可以重入
+            else if (current == getExclusiveOwnerThread()) {
+                int nextc = c + acquires;
+                if (nextc < 0)
+                    throw new Error("Maximum lock count exceeded");
+                setState(nextc);
+                return true;
+            }
+            return false;
+        }
+    }
+
+
+```
+
+​     2.hasQueuedPredecessors()方法 判断锁是否处于竞争状态，竞争的话进入    acquireQueued(addWaiter(Node.EXCLUSIVE), arg)) 否则直接取得锁。这里考虑的情况非常多。
+
+  1.h==t 
+
+1. 队列没有初始化----------------》没有竞争条件，直接尝试获得锁，不用考虑入队问题，获取锁失败，再考虑入队获得锁
+
+2.  队列只有一个节点，头尾节点相同
+
+	  2.1 队列刚刚被初始化，head=tail时此时队列只有一个初始化的空节点。此时若正好有线程进入，那么也可以直接获得锁。
+
+
+
+ 2.h!=t 
+
+​    1.head.next=null
+
+   队列中只有两个节点。-----------》队列中有且只有一个线程节点正在排队，那么此线程节点完全有资格尝试获得锁。
+
+​    2.head.next!=null,head.next.thread=Thread.currentThread
+
+ 队列中有两个以上节点,并且此时队列排队节点的首位节点就是当前线程节点，那么此线程节点完全由资格舱室获得锁.
+
+   3.head.next!=null,head.next.thread!=Thread.currentThread
+
+ 队列中有两个以上节点,并且此时队列排队节点的首位节点不是当前线程节点，那么当前线程节点只能去乖乖排队等待获取锁的资格
+
+```java 
+//=============================hasQueuedPredecessors方法====
+  public final boolean hasQueuedPredecessors() {
+        // The correctness of this depends on head being initialized
+        // before tail and on head.next being accurate if the current
+        // thread is first in queue.
+        Node t = tail; // Read fields in reverse initialization order
+        Node h = head;
+        Node s;
+        //h==t说明 队列未初始化head,tail都为null或者 head=tail刚刚初始化阶段
+        return h != t &&
+            ((s = h.next) == null || s.thread != Thread.currentThread());
+    }
+```
+
+
+
+   3.addWaiter(Node.EXCLUSIVE), arg)方法
+
+```JAVA  
+   private Node addWaiter(Node mode) {
+       //创建当前线程的节点Node
+        Node node = new Node(Thread.currentThread(), mode);
+       //获取当前AQS的tail节点，如果tail不为null说明队列已被初始化
+       //如果tail不为Null则enq初始化AQS队列
+        Node pred = tail;
+        if (pred != null) {
+            //当前线程的前指针指向队列的Tail节点
+            node.prev = pred;
+              //CAS设置当前队列的Tail节点为当前线程节点
+            if (compareAndSetTail(pred, node)) {
+                //设置上一个Tail节点的后指针指向当前线程节点
+                pred.next = node;
+                return node;
+            }
+        }
+       //初始化AQS队列,初始化完成之后放入队列
+        enq(node);
+        return node;
+    }
+//=========================enq初始化AQS方法=============
+   private Node enq(final Node node) {
+        for (;;) {
+            Node t = tail;
+            if (t == null) { // Must initialize
+                //CAS初始化队列的Head  Tail 节点
+                if (compareAndSetHead(new Node()))
+                    tail = head;
+            } 
+ //初始化队列之后，将当前线程的节点，放入队列的第二个元素，第一个元素的Thread永远为null
+            else {
+                //当前线程的前指针指向队列的Tail节点
+                node.prev = t;
+                //CAS设置当前队列的Tail节点为当前线程节点
+                if (compareAndSetTail(t, node)) {
+                    //设置上一个Tail节点的后指针指向当前线程节点
+                    t.next = node;
+                    return t;
+                }
+            }
+        }
+    }
+```
+
+ 
+
+4.在放入队列成功之后 调用acquiredQueue方法
+
+```java 
+final boolean acquireQueued(final Node node, int arg) {
+        boolean failed = true;
+        try {
+            boolean interrupted = false;
+            for (;;) {
+                //获取当前线程的前节点
+                final Node p = node.predecessor();
+                //如果当前线程的前节点是Head的话，
+                //且能获取锁 ，那么清除当前线程节点的线程。设置为Head节点，断开前Head的指向
+                //方便GC回收前Head节点对象
+                //此处是第一次开始自旋尝试获取锁的过程
+                //如果shouldParkAfterFailedAcquire返回false的话即:前置节点的waitstatus已被置为-1，会开始第二次自选尝试获得锁
+                if (p == head && tryAcquire(arg)) {
+                    setHead(node);
+                    p.next = null; // help GC
+                    failed = false;
+                    return interrupted;
+                }
+                //传入当前线程节点的前一节点以及当前线程节点
+                if (shouldParkAfterFailedAcquire(p, node) &&
+                    parkAndCheckInterrupt())
+                    interrupted = true;
+            }
+        } finally {
+            if (failed)
+                cancelAcquire(node);
+        }
+    }
+```
+
+5.如果放入队列成功，并且第一次自旋获取锁失败的话，进入shouldParkAfterFailedAcquire（）方法,
+
+1. 此方法中会判断线程节点的waitstatus.第一次进入必定不为-1，因此就会将当前线程节点的前置节点的waitstatus设为-1.开始第二次自旋获得锁的过程。
+
+2. 第二次自旋仍然没有获得锁之后，那么shouldParkAfterFailedAcquire会返回true,进入后面的parkAndCheckInterrupt()方法
+
+```java 
+  private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+      //Node节点初始化时它的waitStatus为0
+      //当进入的线程节点第一次自旋设置完前置节点的waitstatus之后，再次进入的话会返回true
+      int ws = pred.waitStatus;
+       //线程节点第一次进入的话waitstatus为0，必定不满足
+        if (ws == Node.SIGNAL)
+            /*
+             * This node has already set status asking a release
+             * to signal it, so it can safely park.
+             */
+            return true;
+        if (ws > 0) {
+            /*
+             * Predecessor was cancelled. Skip over predecessors and
+             * indicate retry.
+             */
+            do {
+                node.prev = pred = pred.prev;
+            } while (pred.waitStatus > 0);
+            pred.next = node;
+             //线程节点第一次进入的话waitstatus为0，必定不满足，进入此代码 
+        } else {
+            /*
+             * waitStatus must be 0 or PROPAGATE.  Indicate that we
+             * need a signal, but don't park yet.  Caller will need to
+             * retry to make sure it cannot acquire before parking.
+             */
+            //设置当前线程节点的前置节点的waitstatus为-1
+            compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+        }
+        return false;
+    }
+```
+
+
+
+6. 第二次自旋仍然没有获得锁之后 parkAndCheckInterrupt（）方法
+
+	```java 
+	  private final boolean parkAndCheckInterrupt() {
+	      //让进入此方法当前线程进入睡眠状态
+	        LockSupport.park(this);
+	      //恢复线程中断的标志位
+	        return Thread.interrupted();
+	    }
+	
+	```
+
+	
+
+
+
+
+
+7. unlock()方法
+
+	 1. tryrelease方法会会释放锁，直到将state减至0
+	
+	2. 当锁状态被清空至0后，会将当前线程节点的waitstatus恢复至0，并且unpark队列的下一线程节点
+	
+	```java 
+	    public void unlock() {
+	        sync.release(1);
+	    }
+	//======================================
+	 public final boolean release(int arg) {
+	     //如果成功释放锁的话，后续唤醒队列中的线程，并且还原当前线程节点的waitstatus
+	        if (tryRelease(arg)) {
+	            Node h = head;
+	            if (h != null && h.waitStatus != 0)
+	                //unpark方法唤醒队列中正在等待的线程节点
+	                unparkSuccessor(h);
+	            return true;
+	        }
+	        return false;
+	    }
+	//=================================
+	     protected final boolean tryRelease(int releases) {
+	         //当前state 减1
+	            int c = getState() - releases;
+	         //如果当前线程不是持有锁的线程抛出异常
+	            if (Thread.currentThread() != getExclusiveOwnerThread())
+	                throw new IllegalMonitorStateException();
+	            boolean free = false;
+	         //如果state已经置为0，代表可重入次数state置为了0
+	            if (c == 0) {
+	                free = true;
+	                setExclusiveOwnerThread(null);
+	            }
+	         //重新设置state值
+	            setState(c);
+	            return free;
+	        }
+	//===================================================================
+	 private void unparkSuccessor(Node node) {
+	        /*
+	         * If status is negative (i.e., possibly needing signal) try
+	         * to clear in anticipation of signalling.  It is OK if this
+	         * fails or if status is changed by waiting thread.
+	         */
+	        int ws = node.waitStatus;
+	        if (ws < 0)
+	            compareAndSetWaitStatus(node, ws, 0);
+	
+	        /*
+	         * Thread to unpark is held in successor, which is normally
+	         * just the next node.  But if cancelled or apparently null,
+	         * traverse backwards from tail to find the actual
+	         * non-cancelled successor.
+	         */
+	        Node s = node.next;
+	        if (s == null || s.waitStatus > 0) {
+	            s = null;
+	            for (Node t = tail; t != null && t != node; t = t.prev)
+	                if (t.waitStatus <= 0)
+	                    s = t;
+	        }
+        if (s != null)
+	            //如果队列中有下一节点的话，唤醒下一个线程
+	            LockSupport.unpark(s.thread);
+	    }
+	```
+	
+	
+
+
+
+
+
+
+
+## 5.ThreadLocal源码
+
+1.new ThreadLocal()
+
+2.threadLocal.set(Object)方法
+
+判断currentThread.threadLocalMap 是否为null 如果为Null初始化一个，如果不为null直接set
+
+```java 
+   public void set(T value) {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null)
+            map.set(this, value);
+        else
+            createMap(t, value);
+    }
+```
+
+
+
+3.初始化ThreadLocal方法,并且放入元素
+
+```java 
+void createMap(Thread t, T firstValue) {
+    t.threadLocals = new ThreadLocalMap(this, firstValue);
+}
+//============================================================
+//初始化entry数组
+table = new Entry[INITIAL_CAPACITY];
+//计算当前ThreadlOCAL对象的hashCode值 注意这里的entry为weakReference
+int i = firstKey.threadLocalHashCode & (INITIAL_CAPACITY - 1);
+//给Hash表填充元素
+table[i] = new Entry(firstKey, firstValue);
+size = 1;
+setThreshold(INITIAL_CAPACITY);
+```
+
+4.给已有的ThreadLocalMap赋值
+
+```java 
+private void set(ThreadLocal<?> key, Object value) {
+    // We don't use a fast path as with get() because it is at
+    // least as common to use set() to create new entries as
+    // it is to replace existing ones, in which case, a fast
+    // path would fail more often than not.
+
+    Entry[] tab = table;
+    int len = tab.length;
+    //计算当前ThreadlOCAL对象的hashCode值
+    int i = key.threadLocalHashCode & (len-1);
+
+    //如果当前hash表有值，则取下一个，不断循环，直至位置为null
+    for (Entry e = tab[i];
+         e != null;
+         e = tab[i = nextIndex(i, len)]) {
+        ThreadLocal<?> k = e.get();
+        //如果hash冲突数组当中刚好key一样，新值替换旧值
+        if (k == key) {
+            e.value = value;
+            return;
+        }
+        //如果hash不冲突 设置值 ，涉及到垃圾回收
+        if (k == null) {
+            replaceStaleEntry(key, value, i);
+            return;
+        }
+    }
+    //如果key不一样发生hash冲突
+    tab[i] = new Entry(key, value);
+    int sz = ++size;
+    //如果数组已满，扩容成新数组
+    if (!cleanSomeSlots(i, sz) && sz >= threshold)
+        rehash();
+}
+```
+
+5.entry[]数组的扩容
+
+```java 
+   private void rehash() {
+            expungeStaleEntries();
+
+            // Use lower threshold for doubling to avoid hysteresis
+       //用到数组容量的0.75倍时扩容
+            if (size >= threshold - threshold / 4)
+                resize();
+        }
+//====================================================================
+ private void resize() {
+            Entry[] oldTab = table;
+            int oldLen = oldTab.length;
+            int newLen = oldLen * 2;
+            Entry[] newTab = new Entry[newLen];
+            int count = 0;
+
+            for (int j = 0; j < oldLen; ++j) {
+                Entry e = oldTab[j];
+                if (e != null) {
+                    ThreadLocal<?> k = e.get();
+                    if (k == null) {
+                        e.value = null; // Help the GC
+                    } else {
+                        int h = k.threadLocalHashCode & (newLen - 1);
+                        while (newTab[h] != null)
+                            h = nextIndex(h, newLen);
+                        newTab[h] = e;
+                        count++;
+                    }
+                }
+            }
+
+            setThreshold(newLen);
+            size = count;
+            table = newTab;
+        }
+
+```
+
+  6.get()方法  直接返回当前线程 threadLocalMap的 entry对象,不存在自动初始化
+
+```java 
+ public T get() {
+        Thread t = Thread.currentThread();
+        ThreadLocalMap map = getMap(t);
+        if (map != null) {
+            ThreadLocalMap.Entry e = map.getEntry(this);
+            if (e != null) {
+                @SuppressWarnings("unchecked")
+                T result = (T)e.value;
+                return result;
+            }
+        }
+        return setInitialValue();
+    }
+```
 

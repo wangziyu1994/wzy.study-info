@@ -1,3 +1,4 @@
-/etc/my.cnf mysql核心配置文件
-初始化数据库
+/etc/my.cnf mysql鏍稿績閰嶇疆鏂囦欢
+鍒濆鍖栨暟鎹簱
 /usr/local/webserver/mysql/scripts/mysql_install_db --defaults-file=/etc/my.cnf  --user=mysql
+
