@@ -966,6 +966,9 @@ if (mbd == null || !mbd.isSynthetic()) {
 3. AutowiredAnnotationBeanPostProcessor 也是MBP的子接口，也重写了方法，因此也会再次调用。它的主要工作室完成类(包括其所有父类，不包含静态) 属性，方法的@Autowired/@Value的解析，并且也是将相关信息注册到BD当中去.
 
 	 ```java 
+	 
+	 ```
+
 		@Override
 		public void postProcessMergedBeanDefinition(RootBeanDefinition beanDefinition, Class<?> beanType, String beanName) {
 			//指定类中寻找所有的@AutoWired注解
@@ -999,7 +1002,8 @@ if (mbd == null || !mbd.isSynthetic()) {
 	    
 	```
 
-	
+
+​	
 
 
 
@@ -1766,9 +1770,9 @@ public void init() {
 
 	
 
-## 21.SpringAOP 核心对象的创建
+### 21.SpringAOP 核心对象的创建
 
-### 1.BPP阶段  
+### 1.BPP阶段
 
 1.registerBeanPostProcessor 会把 innerinternalAutoProxyCreator 的AwareAdvisorAutoProxyCreator的BD实例化成Bean,放入BeanFactory中，方便后续调用，因为此类实现了BPP的接口
 
@@ -2710,6 +2714,1259 @@ public AnnotationConfigApplicationContext() {
 
 
 
+# Spring事务
+
+### 1.spring事务的准备工作（依赖spring的AOP）
+
+1. <aop:config>标签的解析，构建AspectJExpressionPointcut类的BD，构建DefaultBeanFactoryPointcutAdvisor类的BD注册到工厂，并且跟AOP一样有AspectJAwareAutoProxyCreator核心BD
+
+```Java 
+//如果是<aop:config>下的<aop:pointcut>的标签的话，构建AspectJExpressionPointcut类的BD
+if (POINTCUT.equals(localName)) {
+    parsePointcut(elt, parserContext);
+}
+//如果是<aop:config>下的<aop:advisor>的标签的话,构建DefaultBeanFactoryPointcutAdvisor类的BD
+else if (ADVISOR.equals(localName)) {
+    parseAdvisor(elt, parserContext);
+}
+```
+
+
+
+2. <tx:advisor>标签的解析，交给TxNamespaceHandler解析，里面有TxAdviceBeanDefinitionParser解析该标签  ,构建一个TransactionInterceptor.class类的BD注册到工厂
+
+	```java 
+	Class<?> beanClass = getBeanClass(element);
+	//=====================================
+	protected Class<?> getBeanClass(Element element) {
+	    return TransactionInterceptor.class;
+	}
+	//===================================
+	protected void doParse(Element element, ParserContext parserContext, BeanDefinitionBuilder builder) {
+	    //给TransactionInterceptor类的BD设置transactionManager属性。属性值是RunTimeReference
+	    builder.addPropertyReference("transactionManager", TxNamespaceHandler.getTransactionManagerName(element));
+	
+	    List<Element> txAttributes = DomUtils.getChildElementsByTagName(element, ATTRIBUTES_ELEMENT);
+	    if (txAttributes.size() > 1) {
+	        parserContext.getReaderContext().error(
+	            "Element <attributes> is allowed at most once inside element <advice>", element);
+	    }
+	    else if (txAttributes.size() == 1) {
+	        // Using attributes source.
+	        Element attributeSourceElement = txAttributes.get(0);
+	        //解析<tx:attributes>标签的子标签<tx:method>
+	        RootBeanDefinition attributeSourceDefinition = parseAttributeSource(attributeSourceElement, parserContext);
+	        //将<tx:attributes>标签转化为BD并且填充到ransactionInterceptor类的BD的transactionAttributeSource属性
+	        builder.addPropertyValue("transactionAttributeSource", attributeSourceDefinition);
+	    }
+	    else {
+	        // Assume annotations source.
+	        builder.addPropertyValue("transactionAttributeSource",
+	                                 new RootBeanDefinition("org.springframework.transaction.annotation.AnnotationTransactionAttributeSource"));
+	    }
+	}
+	//================================================================================
+	private RootBeanDefinition parseAttributeSource(Element attrEle, ParserContext parserContext) {
+			List<Element> methods = DomUtils.getChildElementsByTagName(attrEle, METHOD_ELEMENT);
+			ManagedMap<TypedStringValue, RuleBasedTransactionAttribute> transactionAttributeMap =
+					new ManagedMap<>(methods.size());
+			transactionAttributeMap.setSource(parserContext.extractSource(attrEle));
+	        //循环解析<tx:attributes>子标签<tx:method>
+			for (Element methodEle : methods) {
+				//获取name属性值
+				String name = methodEle.getAttribute(METHOD_NAME_ATTRIBUTE);
+				TypedStringValue nameHolder = new TypedStringValue(name);
+				nameHolder.setSource(parserContext.extractSource(methodEle));
+	
+				RuleBasedTransactionAttribute attribute = new RuleBasedTransactionAttribute();
+				//获取propagation属性值
+				String propagation = methodEle.getAttribute(PROPAGATION_ATTRIBUTE);
+				//获取isolation属性值
+				String isolation = methodEle.getAttribute(ISOLATION_ATTRIBUTE);
+				//获取timeout属性值
+				String timeout = methodEle.getAttribute(TIMEOUT_ATTRIBUTE);
+				//获取read_only属性值
+				String readOnly = methodEle.getAttribute(READ_ONLY_ATTRIBUTE);
+				if (StringUtils.hasText(propagation)) {
+					attribute.setPropagationBehaviorName(RuleBasedTransactionAttribute.PREFIX_PROPAGATION + propagation);
+				}
+				if (StringUtils.hasText(isolation)) {
+					attribute.setIsolationLevelName(RuleBasedTransactionAttribute.PREFIX_ISOLATION + isolation);
+				}
+				if (StringUtils.hasText(timeout)) {
+					attribute.setTimeoutString(timeout);
+				}
+				if (StringUtils.hasText(readOnly)) {
+					attribute.setReadOnly(Boolean.parseBoolean(methodEle.getAttribute(READ_ONLY_ATTRIBUTE)));
+				}
+	
+				List<RollbackRuleAttribute> rollbackRules = new ArrayList<>(1);
+				//获取rollback_for属性值
+				if (methodEle.hasAttribute(ROLLBACK_FOR_ATTRIBUTE)) {
+					String rollbackForValue = methodEle.getAttribute(ROLLBACK_FOR_ATTRIBUTE);
+					addRollbackRuleAttributesTo(rollbackRules, rollbackForValue);
+				}
+				//获取no_rollback_for属性值
+				if (methodEle.hasAttribute(NO_ROLLBACK_FOR_ATTRIBUTE)) {
+					String noRollbackForValue = methodEle.getAttribute(NO_ROLLBACK_FOR_ATTRIBUTE);
+					addNoRollbackRuleAttributesTo(rollbackRules, noRollbackForValue);
+				}
+				//设置rollbackRules属性
+				attribute.setRollbackRules(rollbackRules);
+	
+				transactionAttributeMap.put(nameHolder, attribute);
+			}
+	
+			RootBeanDefinition attributeSourceDefinition = new RootBeanDefinition(NameMatchTransactionAttributeSource.class);
+			attributeSourceDefinition.setSource(parserContext.extractSource(attrEle));
+			//将<tx:arrtrbute>子标签的值都转化为一个map放入TransactionInterceptor类BD的nameMap属性当中
+			attributeSourceDefinition.getPropertyValues().add("nameMap", transactionAttributeMap);
+			return attributeSourceDefinition;
+		}
+	```
+
+
+
+
+
+### 2.Spring事务核心Bean的创建
+
+1. registerBPP阶段注入AspectJAwareAutoProxyCreator Bean
+
+2. 非advior对象resloveBeforeInsationBeanPostProceessor中的AspectJAwareAutoProxyCreator
+
+	的shouldSkip() 正式实例化DefaultBeanFactoryPointcutAdvisor,此过程会因为依赖注入实例化
+
+	AspectPointCutExpression  getBean RuntimeBeanReference (会直接实例化Bean) 
+
+	advisedBean  getBean RuntimeBeanNameReference  (设置BeanName,不会实例化Bean) 
+
+	```java 
+	public List<Advisor> findAdvisorBeans() {
+			// Determine list of advisor bean names, if not cached already.
+			//获取之前缓存的AOP的BeanName
+			String[] advisorNames = this.cachedAdvisorBeanNames;
+			if (advisorNames == null) {
+				// Do not initialize FactoryBeans here: We need to leave all regular beans
+				// uninitialized to let the auto-proxy creator apply to them!
+				//从BeanFactory当中获取所有Advisor接口实现类的BeanName
+				advisorNames = BeanFactoryUtils.beanNamesForTypeIncludingAncestors(
+						this.beanFactory, Advisor.class, true, false);
+				this.cachedAdvisorBeanNames = advisorNames;
+			}
+			if (advisorNames.length == 0) {
+				return new ArrayList<>();
+			}
+	
+			List<Advisor> advisors = new ArrayList<>();
+			//遍历advior实现类的BeanNAME 并且进行实例化
+			for (String name : advisorNames) {
+				if (isEligibleBean(name)) {
+					if (this.beanFactory.isCurrentlyInCreation(name)) {
+						if (logger.isTraceEnabled()) {
+							logger.trace("Skipping currently created advisor '" + name + "'");
+						}
+					}
+					else {
+						try {
+							//正式开始实例化Advisor实现类Bean 并且完成后加入缓存
+							advisors.add(this.beanFactory.getBean(name, Advisor.class));
+						}
+						catch (BeanCreationException ex) {
+							Throwable rootCause = ex.getMostSpecificCause();
+							if (rootCause instanceof BeanCurrentlyInCreationException) {
+								BeanCreationException bce = (BeanCreationException) rootCause;
+								String bceBeanName = bce.getBeanName();
+								if (bceBeanName != null && this.beanFactory.isCurrentlyInCreation(bceBeanName)) {
+									if (logger.isTraceEnabled()) {
+										logger.trace("Skipping advisor '" + name +
+												"' with dependency on currently created bean: " + ex.getMessage());
+									}
+									// Ignore: indicates a reference back to the bean we're trying to advise.
+									// We want to find advisors other than the currently created bean itself.
+									continue;
+								}
+							}
+							throw ex;
+						}
+					}
+				}
+			}
+			return advisors;
+		}
+	```
+
+	
+
+
+
+3. advice对象的创建
+
+	在创建动态代理对象获取对应advisor的时候，会有一步判断，在判断的getAdvice()里面会根据advisedBeanName来创建advice，并且将之赋值给DefaultBeanFactoryAdvisor的advice属性.
+
+	至此，事务的核心对象已经创建完毕。进行下一步调用。
+
+	**注意此advice也实现了MethodInceptor接口，所以里面有interceptor方法**
+
+	```java 
+	protected List<Advisor> findEligibleAdvisors(Class<?> beanClass, String beanName) {
+	    //获取之前创建好的所有Advisor对象
+	    List<Advisor> candidateAdvisors = findCandidateAdvisors();
+	    //遍历所有Advisor对象，找到匹配的Advisor对象
+	    List<Advisor> eligibleAdvisors = findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+	    //传入一个新建的Advisor对象在集合首位，目的是方便获取MethodInvocation对象
+	    extendAdvisors(eligibleAdvisors);
+	    if (!eligibleAdvisors.isEmpty()) {
+	        eligibleAdvisors = sortAdvisors(eligibleAdvisors);
+	    }
+	    return eligibleAdvisors;
+	}
+	//========================================================================
+	protected void extendAdvisors(List<Advisor> candidateAdvisors) {
+	    AspectJProxyUtils.makeAdvisorChainAspectJCapableIfNecessary(candidateAdvisors);
+	}
+	
+	//============================================================================
+	public static boolean makeAdvisorChainAspectJCapableIfNecessary(List<Advisor> advisors) {
+	    // Don't add advisors to an empty list; may indicate that proxying is just not required
+	    if (!advisors.isEmpty()) {
+	        boolean foundAspectJAdvice = false;
+	        for (Advisor advisor : advisors) {
+	            // Be careful not to get the Advice without a guard, as this might eagerly
+	            // instantiate a non-singleton AspectJ aspect...
+	            //注意此处里面会调用事务DefaultBeanFactoryPointcutAdvisor实现类的getAdvice方法实例化advice
+	            if (isAspectJAdvice(advisor)) {
+	                foundAspectJAdvice = true;
+	                break;
+	            }
+	        }
+	        if (foundAspectJAdvice && !advisors.contains(ExposeInvocationInterceptor.ADVISOR)) {
+	            advisors.add(0, ExposeInvocationInterceptor.ADVISOR);
+	            return true;
+	        }
+	    }
+	    return false;
+	}
+	//================================================================================
+	private static boolean isAspectJAdvice(Advisor advisor) {
+	    //事务advisor会调用getAdvice 实例化自己的advice对象，并且填充属性
+	    return (advisor instanceof InstantiationModelAwarePointcutAdvisor ||
+	            advisor.getAdvice() instanceof AbstractAspectJAdvice ||
+	            (advisor instanceof PointcutAdvisor &&
+	             ((PointcutAdvisor) advisor).getPointcut() instanceof AspectJExpressionPointcut));
+	}
+	//=============================================================================
+	public Advice getAdvice() {
+	    Advice advice = this.advice;
+	    if (advice != null) {
+	        return advice;
+	    }
+	
+	    Assert.state(this.adviceBeanName != null, "'adviceBeanName' must be specified");
+	    Assert.state(this.beanFactory != null, "BeanFactory must be set to resolve 'adviceBeanName'");
+	    //事务的advisor对象的adviceBeanName此处是有值的，并且工厂中是含有BD的，因此advice对象会在此实例化
+	    if (this.beanFactory.isSingleton(this.adviceBeanName)) {
+	        // Rely on singleton semantics provided by the factory.
+	        advice = this.beanFactory.getBean(this.adviceBeanName, Advice.class);
+	        //事务的advior 的advice属性会在此赋值
+	        this.advice = advice;
+	        return advice;
+	    }
+	    else {
+	        // No singleton guarantees from the factory -> let's lock locally but
+	        // reuse the factory's singleton lock, just in case a lazy dependency
+	        // of our advice bean happens to trigger the singleton lock implicitly...
+	        synchronized (this.adviceMonitor) {
+	            advice = this.advice;
+	            if (advice == null) {
+	                advice = this.beanFactory.getBean(this.adviceBeanName, Advice.class);
+	                this.advice = advice;
+	            }
+	            return advice;
+	        }
+	    }
+	}
+	
+	```
+
+	
+
+### 3.Spring事务注解方式配置方式
+
+ #### 1.BD准备阶段
+
+1. 解析@EnableTransactionManagement 的@Import注解里面包含TransactionManagementConfigurationSelector.class ，此类注册了两个BD，一个AutoProxyRegistrar.class实现了ImportSelectorRegister接口.
+
+一个ProxyTransactionManagementConfiguration 是@Configuration配置类.
+
+```java 
+public final String[] selectImports(AnnotationMetadata importingClassMetadata) {
+		Class<?> annType = GenericTypeResolver.resolveTypeArgument(getClass(), AdviceModeImportSelector.class);
+		Assert.state(annType != null, "Unresolvable type argument for AdviceModeImportSelector");
+
+		AnnotationAttributes attributes = AnnotationConfigUtils.attributesFor(importingClassMetadata, annType);
+		if (attributes == null) {
+			throw new IllegalArgumentException(String.format(
+					"@%s is not present on importing class '%s' as expected",
+					annType.getSimpleName(), importingClassMetadata.getClassName()));
+		}
+
+		AdviceMode adviceMode = attributes.getEnum(getAdviceModeAttributeName());
+		String[] imports = selectImports(adviceMode);
+		if (imports == null) {
+			throw new IllegalArgumentException("Unknown AdviceMode: " + adviceMode);
+		}
+		return imports;
+	}
+//============================================================	
+protected String[] selectImports(AdviceMode adviceMode) {
+		switch (adviceMode) {
+			case PROXY:
+				return new String[] {AutoProxyRegistrar.class.getName(),
+						ProxyTransactionManagementConfiguration.class.getName()};
+			case ASPECTJ:
+				return new String[] {determineTransactionAspectClass()};
+			default:
+				return null;
+		}
+	}
+```
+
+
+
+2.  AutoProxyRegistrar 会用registerBeanDefinition方法注册InfrastructureAdvisorAutoProxyCreator.class BD
+
+```java 
+public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+    boolean candidateFound = false;
+    Set<String> annTypes = importingClassMetadata.getAnnotationTypes();
+    for (String annType : annTypes) {
+        AnnotationAttributes candidate = AnnotationConfigUtils.attributesFor(importingClassMetadata, annType);
+        if (candidate == null) {
+            continue;
+        }
+        Object mode = candidate.get("mode");
+        Object proxyTargetClass = candidate.get("proxyTargetClass");
+        if (mode != null && proxyTargetClass != null && AdviceMode.class == mode.getClass() &&
+            Boolean.class == proxyTargetClass.getClass()) {
+            candidateFound = true;
+            if (mode == AdviceMode.PROXY) {
+                AopConfigUtils.registerAutoProxyCreatorIfNecessary(registry);
+                if ((Boolean) proxyTargetClass) {
+                    AopConfigUtils.forceAutoProxyCreatorToUseClassProxying(registry);
+                    return;
+                }
+            }
+        }
+    }
+    if (!candidateFound && logger.isInfoEnabled()) {
+        String name = getClass().getSimpleName();
+        logger.info(String.format("%s was imported but no annotations were found " +
+                                  "having both 'mode' and 'proxyTargetClass' attributes of type " +
+                                  "AdviceMode and boolean respectively. This means that auto proxy " +
+                                  "creator registration and configuration may not have occurred as " +
+                                  "intended, and components may not be proxied as expected. Check to " +
+                                  "ensure that %s has been @Import'ed on the same class where these " +
+                                  "annotations are declared; otherwise remove the import of %s " +
+                                  "altogether.", name, name, name));
+    }
+}
+//===============================================================
+public static BeanDefinition registerAutoProxyCreatorIfNecessary(BeanDefinitionRegistry registry) {
+    return registerAutoProxyCreatorIfNecessary(registry, null);
+}
+//====================================================================
+public static BeanDefinition registerAutoProxyCreatorIfNecessary(
+    BeanDefinitionRegistry registry, @Nullable Object source) {
+
+    return registerOrEscalateApcAsRequired(InfrastructureAdvisorAutoProxyCreator.class, registry, source);
+}
+```
+
+3. ProxyTransactionManagementConfiguration 配置类也会注册BD
+
+	```java 
+	@Configuration(proxyBeanMethods = false)
+	@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+	public class ProxyTransactionManagementConfiguration extends AbstractTransactionManagementConfiguration {
+	
+		@Bean(name = TransactionManagementConfigUtils.TRANSACTION_ADVISOR_BEAN_NAME)
+		@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+		public BeanFactoryTransactionAttributeSourceAdvisor transactionAdvisor(
+				TransactionAttributeSource transactionAttributeSource, TransactionInterceptor transactionInterceptor) {
+	
+			BeanFactoryTransactionAttributeSourceAdvisor advisor = new BeanFactoryTransactionAttributeSourceAdvisor();
+			advisor.setTransactionAttributeSource(transactionAttributeSource);
+			advisor.setAdvice(transactionInterceptor);
+			if (this.enableTx != null) {
+				advisor.setOrder(this.enableTx.<Integer>getNumber("order"));
+			}
+			return advisor;
+		}
+	
+		@Bean
+		@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+		public TransactionAttributeSource transactionAttributeSource() {
+			return new AnnotationTransactionAttributeSource();
+		}
+	
+		@Bean
+		@Role(BeanDefinition.ROLE_INFRASTRUCTURE)
+		public TransactionInterceptor transactionInterceptor(TransactionAttributeSource transactionAttributeSource) {
+			TransactionInterceptor interceptor = new TransactionInterceptor();
+			interceptor.setTransactionAttributeSource(transactionAttributeSource);
+			if (this.txManager != null) {
+				interceptor.setTransactionManager(this.txManager);
+			}
+			return interceptor;
+		}
+	
+	}
+	```
+
+	
+
+
+
+#### 2.注解核心对象的创建
+
+**所有@Configuration修饰，并且含有full 属性Attribute的配置类都会在ConfigurationClassPostPocessor的posssAfterBeanFactory方法中被设置为需要代理的BD，之后再工厂实例化的过程中也会被动态代理**
+
+1. 在对象的创建过程中会调用applyAfterPostProcessor方法，该方法会遍历执行所有的BeanPostProecessor的后置增强方法。其中有一个就是InfrastructureAdvisorAutoProxyCreator  如果是需要动态代理的对象，那么再经过此类的后置增强方法中，就会寻找创建advisor，并且执行创建有关advisor的一系列核心对象。包括
+
+BeanFactoryTransactionAttributeSourceAdvisor，TransactionInterceptor，TransactionAttributeSource。
+
+其中BeanFactoryTransactionAttributeSourceAdvisor的 findAdvisorsThatCanApply 会调用AopUtil的canApply方法最终会调用到TransactionAttributeSource（实际是AnnotationTransactionAttributeSource  继承AbstractFallbackTransactionAttributeSource）的getTransactionAttribute方法 判断是否@Transactional方法，并且判断目标类的方式是否与Advisor匹配。如果匹配直接加入advisor当中
+
+```java 
+Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, null);
+//================================================
+	protected Object[] getAdvicesAndAdvisorsForBean(
+			Class<?> beanClass, String beanName, @Nullable TargetSource targetSource) {
+        //获取之前创建的所有Advisor对象
+		List<Advisor> advisors = findEligibleAdvisors(beanClass, beanName);
+		if (advisors.isEmpty()) {
+			return DO_NOT_PROXY;
+		}
+		return advisors.toArray();
+	}
+//===============================================================
+protected List<Advisor> findEligibleAdvisors(Class<?> beanClass, String beanName) {
+		//获取之前创建好的所有Advisor对象
+		List<Advisor> candidateAdvisors = findCandidateAdvisors();
+		//遍历所有Advisor对象，找到匹配的Advisor对象
+		List<Advisor> eligibleAdvisors = findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+		//传入一个新建的Advisor对象在集合首位，目的是方便获取MethodInvocation对象
+		extendAdvisors(eligibleAdvisors);
+		if (!eligibleAdvisors.isEmpty()) {
+			eligibleAdvisors = sortAdvisors(eligibleAdvisors);
+		}
+		return eligibleAdvisors;
+	}
+//=========================================================================
+protected List<Advisor> findAdvisorsThatCanApply(
+			List<Advisor> candidateAdvisors, Class<?> beanClass, String beanName) {
+
+		ProxyCreationContext.setCurrentProxiedBeanName(beanName);
+		try {
+			//返回匹配的Advisor对象
+			return AopUtils.findAdvisorsThatCanApply(candidateAdvisors, beanClass);
+		}
+		finally {
+			ProxyCreationContext.setCurrentProxiedBeanName(null);
+		}
+	}
+//===============================================================================
+public static List<Advisor> findAdvisorsThatCanApply(List<Advisor> candidateAdvisors, Class<?> clazz) {
+		//如果advisors集合为空，直接退出不做处理。
+		if (candidateAdvisors.isEmpty()) {
+			return candidateAdvisors;
+		}
+		List<Advisor> eligibleAdvisors = new ArrayList<>();
+		//将IntroductionAdvisor类的Bean单独存放至一个集合里面
+		for (Advisor candidate : candidateAdvisors) {
+			if (candidate instanceof IntroductionAdvisor && canApply(candidate, clazz)) {
+				eligibleAdvisors.add(candidate);
+			}
+		}
+		//判断是否有IntroductionAdvisor类的Bean
+		boolean hasIntroductions = !eligibleAdvisors.isEmpty();
+
+		//遍历所有Advisor，分类匹配advisor
+		for (Advisor candidate : candidateAdvisors) {
+			if (candidate instanceof IntroductionAdvisor) {
+				// already processed
+				continue;
+			}
+			//核心判断是否当前Bean可以跟Advisor对象匹配
+			if (canApply(candidate, clazz, hasIntroductions)) {
+				eligibleAdvisors.add(candidate);
+			}
+		}
+		return eligibleAdvisors;
+	}
+//==============================================================================
+public static boolean canApply(Advisor advisor, Class<?> targetClass, boolean hasIntroductions) {
+		if (advisor instanceof IntroductionAdvisor) {
+			return ((IntroductionAdvisor) advisor).getClassFilter().matches(targetClass);
+		}
+		//一般方法级别的动态代理，进入以下的判断
+		else if (advisor instanceof PointcutAdvisor) {
+			PointcutAdvisor pca = (PointcutAdvisor) advisor;
+			//传入pointCut的AspectExpression对象，AspectExpression对象中包含 methodMather和ClassFilter
+			return canApply(pca.getPointcut(), targetClass, hasIntroductions);
+		}
+		else {
+			// It doesn't have a pointcut so we assume it applies.
+			return true;
+		}
+	}
+//====================================================
+	public static boolean canApply(Pointcut pc, Class<?> targetClass, boolean hasIntroductions) {
+		Assert.notNull(pc, "Pointcut must not be null");
+		if (!pc.getClassFilter().matches(targetClass)) {
+			return false;
+		}
+
+		MethodMatcher methodMatcher = pc.getMethodMatcher();
+		if (methodMatcher == MethodMatcher.TRUE) {
+			// No need to iterate the methods if we're matching any method anyway...
+			return true;
+		}
+
+		IntroductionAwareMethodMatcher introductionAwareMethodMatcher = null;
+		if (methodMatcher instanceof IntroductionAwareMethodMatcher) {
+			introductionAwareMethodMatcher = (IntroductionAwareMethodMatcher) methodMatcher;
+		}
+
+		Set<Class<?>> classes = new LinkedHashSet<>();
+		if (!Proxy.isProxyClass(targetClass)) {
+			classes.add(ClassUtils.getUserClass(targetClass));
+		}
+		classes.addAll(ClassUtils.getAllInterfacesForClassAsSet(targetClass));
+       //遍历targetClass的所有method，调用当前advisor的methodMatcher对象的matches方法
+		for (Class<?> clazz : classes) {
+			Method[] methods = ReflectionUtils.getAllDeclaredMethods(clazz);
+			for (Method method : methods) {
+				if (introductionAwareMethodMatcher != null ?
+						introductionAwareMethodMatcher.matches(method, targetClass, hasIntroductions) :
+						methodMatcher.matches(method, targetClass)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+//===============================================
+public TransactionAttribute getTransactionAttribute(Method method, @Nullable Class<?> targetClass) {
+		if (method.getDeclaringClass() == Object.class) {
+			return null;
+		}
+
+		// First, see if we have a cached value.
+		Object cacheKey = getCacheKey(method, targetClass);
+		TransactionAttribute cached = this.attributeCache.get(cacheKey);
+		if (cached != null) {
+			// Value will either be canonical value indicating there is no transaction attribute,
+			// or an actual transaction attribute.
+			if (cached == NULL_TRANSACTION_ATTRIBUTE) {
+				return null;
+			}
+			else {
+				return cached;
+			}
+		}
+		else {
+			// We need to work it out.
+			TransactionAttribute txAttr = computeTransactionAttribute(method, targetClass);
+			// Put it in the cache.
+			if (txAttr == null) {
+				this.attributeCache.put(cacheKey, NULL_TRANSACTION_ATTRIBUTE);
+			}
+			else {
+				String methodIdentification = ClassUtils.getQualifiedMethodName(method, targetClass);
+				if (txAttr instanceof DefaultTransactionAttribute) {
+					DefaultTransactionAttribute dta = (DefaultTransactionAttribute) txAttr;
+					dta.setDescriptor(methodIdentification);
+					dta.resolveAttributeStrings(this.embeddedValueResolver);
+				}
+				if (logger.isTraceEnabled()) {
+					logger.trace("Adding transactional method '" + methodIdentification + "' with attribute: " + txAttr);
+				}
+				this.attributeCache.put(cacheKey, txAttr);
+			}
+			return txAttr;
+		}
+	}
+
+```
+
+
+
+#### 3.Spring事务的处理流
+
+1. 入责任链调用  DynamicAdvisedInterceptor  
+2. ExposedInvocationInterceptor 转入 TransactionInteceptor调用
+
+```java 
+public Object invoke(MethodInvocation invocation) throws Throwable {
+		// Work out the target class: may be {@code null}.
+		// The TransactionAttributeSource should be passed the target class
+		// as well as the method, which may be from an interface.
+		Class<?> targetClass = (invocation.getThis() != null ? AopUtils.getTargetClass(invocation.getThis()) : null);
+
+		// Adapt to TransactionAspectSupport's invokeWithinTransaction...
+		return invokeWithinTransaction(invocation.getMethod(), targetClass, new CoroutinesInvocationCallback() {
+			@Override
+			@Nullable
+			public Object proceedWithInvocation() throws Throwable {
+				return invocation.proceed();
+			}
+			@Override
+			public Object getTarget() {
+				return invocation.getThis();
+			}
+			@Override
+			public Object[] getArguments() {
+				return invocation.getArguments();
+			}
+		});
+	}
+```
+
+
+
+**TransactionInteceptor的Invoke核心处理流程**
+
+1. 获取TxAttribute 以及TransactionManager
+2. 第一次TransactionInfo 不存在，则getTransaction() 创建初始化。他的TransactionStatus 为newTransaction
+
+```java 
+protected TransactionInfo createTransactionIfNecessary(@Nullable PlatformTransactionManager tm,
+			@Nullable TransactionAttribute txAttr, final String joinpointIdentification) {
+
+		// If no name specified, apply method identification as transaction name.
+		if (txAttr != null && txAttr.getName() == null) {
+			txAttr = new DelegatingTransactionAttribute(txAttr) {
+				@Override
+				public String getName() {
+					return joinpointIdentification;
+				}
+			};
+		}
+
+		TransactionStatus status = null;
+		if (txAttr != null) {
+			if (tm != null) {
+				status = tm.getTransaction(txAttr);
+			}
+			else {
+				if (logger.isDebugEnabled()) {
+					logger.debug("Skipping transactional joinpoint [" + joinpointIdentification +
+							"] because no transaction manager has been configured");
+				}
+			}
+		}
+		return prepareTransactionInfo(tm, txAttr, joinpointIdentification, status);
+	}
+```
+
+
+
+3. 创建事务的过程中，获取事务状态。里面根据事务的传播特性。决定了事务不同的逻辑
+
+	如果是独立事务怎么进行，如果是嵌套事务，如何根据隔离级别进行事务的控制
+
+```java 
+	public final TransactionStatus getTransaction(@Nullable TransactionDefinition definition)
+			throws TransactionException {
+
+		// Use defaults if no transaction definition given.
+		TransactionDefinition def = (definition != null ? definition : TransactionDefinition.withDefaults());
+
+		Object transaction = doGetTransaction();
+		boolean debugEnabled = logger.isDebugEnabled();
+
+		//判断当前是否已经存在事务，如果存在直接走下面的逻辑
+		if (isExistingTransaction(transaction)) {
+			// Existing transaction found -> check propagation behavior to find out how to behave.
+			return handleExistingTransaction(def, transaction, debugEnabled);
+		}
+
+		//当前不存在事务，走下面的逻辑
+		// Check definition settings for new transaction.
+		if (def.getTimeout() < TransactionDefinition.TIMEOUT_DEFAULT) {
+			throw new InvalidTimeoutException("Invalid transaction timeout", def.getTimeout());
+		}
+
+		// No existing transaction found -> check propagation behavior to find out how to proceed.
+		if (def.getPropagationBehavior() == TransactionDefinition.PROPAGATION_MANDATORY) {
+			throw new IllegalTransactionStateException(
+					"No existing transaction found for transaction marked with propagation 'mandatory'");
+		}
+		else if (def.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRED ||
+				def.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRES_NEW ||
+				def.getPropagationBehavior() == TransactionDefinition.PROPAGATION_NESTED) {
+			SuspendedResourcesHolder suspendedResources = suspend(null);
+			if (debugEnabled) {
+				logger.debug("Creating new transaction with name [" + def.getName() + "]: " + def);
+			}
+			try {
+				//开启一个事务
+				return startTransaction(def, transaction, debugEnabled, suspendedResources);
+			}
+			catch (RuntimeException | Error ex) {
+				resume(null, suspendedResources);
+				throw ex;
+			}
+		}
+		else {
+			// Create "empty" transaction: no actual transaction, but potentially synchronization.
+			if (def.getIsolationLevel() != TransactionDefinition.ISOLATION_DEFAULT && logger.isWarnEnabled()) {
+				logger.warn("Custom isolation level specified but no actual transaction initiated; " +
+						"isolation level will effectively be ignored: " + def);
+			}
+			boolean newSynchronization = (getTransactionSynchronization() == SYNCHRONIZATION_ALWAYS);
+			return prepareTransactionStatus(def, null, true, newSynchronization, debugEnabled, null);
+		}
+	}
+```
+
+
+
+
+
+4. 将当前事务对象绑定到当前线程，也就是向ThreadLocal存入。并且设置外层事务对象（如果有的话）。保护现场。
+
+```java 
+private void bindToThread() {
+			// Expose current TransactionStatus, preserving any existing TransactionStatus
+			// for restoration after this transaction is complete.
+			this.oldTransactionInfo = transactionInfoHolder.get();
+			transactionInfoHolder.set(this);
+		}
+```
+
+
+
+
+
+5.事务对象准备完毕之后commitTransactionAfterReturning（），提交SQL
+
+```java 
+ //独立的事务，提交事务的方法
+			commitTransactionAfterReturning(txInfo);
+//===========================
+protected void commitTransactionAfterReturning(@Nullable TransactionInfo txInfo) {
+		if (txInfo != null && txInfo.getTransactionStatus() != null) {
+			if (logger.isTraceEnabled()) {
+				logger.trace("Completing transaction for [" + txInfo.getJoinpointIdentification() + "]");
+			}
+			txInfo.getTransactionManager().commit(txInfo.getTransactionStatus());
+		}
+	}
+//==============================================================
+	public final void commit(TransactionStatus status) throws TransactionException {
+		if (status.isCompleted()) {
+			throw new IllegalTransactionStateException(
+					"Transaction is already completed - do not call commit or rollback more than once per transaction");
+		}
+
+		DefaultTransactionStatus defStatus = (DefaultTransactionStatus) status;
+		if (defStatus.isLocalRollbackOnly()) {
+			if (defStatus.isDebug()) {
+				logger.debug("Transactional code has requested rollback");
+			}
+			processRollback(defStatus, false);
+			return;
+		}
+
+		if (!shouldCommitOnGlobalRollbackOnly() && defStatus.isGlobalRollbackOnly()) {
+			if (defStatus.isDebug()) {
+				logger.debug("Global transaction is marked as rollback-only but transactional code requested commit");
+			}
+			processRollback(defStatus, true);
+			return;
+		}
+        //提交事务
+		processCommit(defStatus);
+	}
+//===========================================================================
+	private void processCommit(DefaultTransactionStatus status) throws TransactionException {
+		try {
+			boolean beforeCompletionInvoked = false;
+
+			try {
+				boolean unexpectedRollback = false;
+				prepareForCommit(status);
+				triggerBeforeCommit(status);
+				triggerBeforeCompletion(status);
+				beforeCompletionInvoked = true;
+
+				if (status.hasSavepoint()) {
+					if (status.isDebug()) {
+						logger.debug("Releasing transaction savepoint");
+					}
+					unexpectedRollback = status.isGlobalRollbackOnly();
+					status.releaseHeldSavepoint();
+				}
+				else if (status.isNewTransaction()) {
+					if (status.isDebug()) {
+						logger.debug("Initiating transaction commit");
+					}
+					unexpectedRollback = status.isGlobalRollbackOnly();
+					doCommit(status);
+				}
+				else if (isFailEarlyOnGlobalRollbackOnly()) {
+					unexpectedRollback = status.isGlobalRollbackOnly();
+				}
+
+				// Throw UnexpectedRollbackException if we have a global rollback-only
+				// marker but still didn't get a corresponding exception from commit.
+				if (unexpectedRollback) {
+					throw new UnexpectedRollbackException(
+							"Transaction silently rolled back because it has been marked as rollback-only");
+				}
+			}
+			catch (UnexpectedRollbackException ex) {
+				// can only be caused by doCommit
+				triggerAfterCompletion(status, TransactionSynchronization.STATUS_ROLLED_BACK);
+				throw ex;
+			}
+			catch (TransactionException ex) {
+				// can only be caused by doCommit
+				if (isRollbackOnCommitFailure()) {
+					doRollbackOnCommitException(status, ex);
+				}
+				else {
+					triggerAfterCompletion(status, TransactionSynchronization.STATUS_UNKNOWN);
+				}
+				throw ex;
+			}
+			catch (RuntimeException | Error ex) {
+				if (!beforeCompletionInvoked) {
+					triggerBeforeCompletion(status);
+				}
+				doRollbackOnCommitException(status, ex);
+				throw ex;
+			}
+
+			// Trigger afterCommit callbacks, with an exception thrown there
+			// propagated to callers but the transaction still considered as committed.
+			try {
+				triggerAfterCommit(status);
+			}
+			finally {
+				triggerAfterCompletion(status, TransactionSynchronization.STATUS_COMMITTED);
+			}
+
+		}
+		finally {
+			cleanupAfterCompletion(status);
+		}
+	}
+//=============================================================================
+	protected void doCommit(DefaultTransactionStatus status) {
+		DataSourceTransactionObject txObject = (DataSourceTransactionObject) status.getTransaction();
+		Connection con = txObject.getConnectionHolder().getConnection();
+		if (status.isDebug()) {
+			logger.debug("Committing JDBC transaction on Connection [" + con + "]");
+		}
+		try {
+			con.commit();
+		}
+		catch (SQLException ex) {
+			throw translateException("JDBC commit", ex);
+		}
+	}
+```
+
+
+
+6.事务方法出现异常的话，回滚事务 completeTransactionAfterThrowing(txInfo, ex);
+
+```java 
+protected void completeTransactionAfterThrowing(@Nullable TransactionInfo txInfo, Throwable ex) {
+		if (txInfo != null && txInfo.getTransactionStatus() != null) {
+			if (logger.isTraceEnabled()) {
+				logger.trace("Completing transaction for [" + txInfo.getJoinpointIdentification() +
+						"] after exception: " + ex);
+			}
+			if (txInfo.transactionAttribute != null && txInfo.transactionAttribute.rollbackOn(ex)) {
+				try {
+					txInfo.getTransactionManager().rollback(txInfo.getTransactionStatus());
+				}
+				catch (TransactionSystemException ex2) {
+					logger.error("Application exception overridden by rollback exception", ex);
+					ex2.initApplicationException(ex);
+					throw ex2;
+				}
+				catch (RuntimeException | Error ex2) {
+					logger.error("Application exception overridden by rollback exception", ex);
+					throw ex2;
+				}
+			}
+			else {
+				// We don't roll back on this exception.
+				// Will still roll back if TransactionStatus.isRollbackOnly() is true.
+				try {
+					txInfo.getTransactionManager().commit(txInfo.getTransactionStatus());
+				}
+				catch (TransactionSystemException ex2) {
+					logger.error("Application exception overridden by commit exception", ex);
+					ex2.initApplicationException(ex);
+					throw ex2;
+				}
+				catch (RuntimeException | Error ex2) {
+					logger.error("Application exception overridden by commit exception", ex);
+					throw ex2;
+				}
+			}
+		}
+	}
+
+//===================================================================
+	protected void doRollback(DefaultTransactionStatus status) {
+		DataSourceTransactionObject txObject = (DataSourceTransactionObject) status.getTransaction();
+		Connection con = txObject.getConnectionHolder().getConnection();
+		if (status.isDebug()) {
+			logger.debug("Rolling back JDBC transaction on Connection [" + con + "]");
+		}
+		try {
+			con.rollback();
+		}
+		catch (SQLException ex) {
+			throw translateException("JDBC rollback", ex);
+		}
+	}
+//==================================================================================
+
+
+
+```
+
+
+
+
+
+### 4.Spring事务的传播特性组合
+
+**前置事务的传播特性知识**
+
+Required:支持外层事务，如果没有的话，会在当前创建一个新的事务(当前必有事务)
+
+SUPPORTs:支持外层事务，如果没有的话，当前以非事务的方式运行（当前可能有事务，也可能无事务）
+
+MANDATORY:支持外部事务，如果没有的话，直接抛出异常（当前必有事务）
+
+Require_NEW:不支持外层事务，挂起外层事务，创建一个新的事务运行(当前必有事务)
+
+NOT_SUPPORTED:不支持外层事务,挂起外层事务,当前方法以非事务的方式运行（当前无事务）
+
+NEVER：不支持外层事务,直接抛出异常（当前无事务）
+
+NESTED：支持外层事务，当前事务之前设置保存点.如果没有的话，则创建一个新的事务（当前必有事务）
+
+
+
+####1.外层事务是Required
+
+#####1.当前事务是Required，当前事务会延用外层事务。没有的话就新建一个事务
+
+如果当前事务成功的话，外层事务失败的话，内层事务不会提交，外层事务统一回滚。
+
+如果当前事务出错的话，外层事务成功的话, 内层事务不会提交，外层事务统一回滚。
+
+如果当前事务成功的话，外层事务成功的话，内层事务不会提交，外层事务统一回滚。
+
+如果当前事务失败的话，外层事务失败的话，内层事务不会回滚，外层事务统一回滚。
+
+```java 
+//如果之前已经存在事务，暂时不在此处回滚.
+else {
+    // Participating in larger transaction
+    if (status.hasTransaction()) {
+        if (status.isLocalRollbackOnly() || isGlobalRollbackOnParticipationFailure()) {
+            if (status.isDebug()) {
+                logger.debug("Participating transaction failed - marking existing transaction as rollback-only");
+            }
+            doSetRollbackOnly(status);
+        }
+        else {
+            if (status.isDebug()) {
+                logger.debug("Participating transaction failed - letting transaction originator decide on rollback");
+            }
+        }
+    }
+    else {
+        logger.debug("Should roll back transaction but cannot - no transaction available");
+    }
+    // Unexpected rollback only matters here if we're asked to fail early
+    if (!isFailEarlyOnGlobalRollbackOnly()) {
+        unexpectedRollback = false;
+    }
+}
+```
+
+
+
+
+
+##### 2.内层事务是RequiredNew，挂起外部事务，内层会单独开启自己的事务。没有的话，直接开启一个新事务
+
+如果当前事务成功的话，外层事务失败的话，当前事务直接提交。外部事务回滚。
+
+如果当前事务出错的话，外层事务成功的话, 当前事务先回滚，外层事务再回滚
+
+如果当前事务成功的话，外层事务成功的话，当前事务先提交。外部事务后提交。
+
+如果当前事务失败的话，外层事务失败的话，当前事务先回滚。外部事务后回滚。
+
+```java 
+//内层事务为RequireNew的情况
+		if (definition.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRES_NEW) {
+			if (debugEnabled) {
+				logger.debug("Suspending current transaction, creating new transaction with name [" +
+						definition.getName() + "]");
+			}
+			SuspendedResourcesHolder suspendedResources = suspend(transaction);
+			try {
+				return startTransaction(definition, transaction, debugEnabled, suspendedResources);
+			}
+			catch (RuntimeException | Error beginEx) {
+				resumeAfterBeginException(transaction, suspendedResources, beginEx);
+				throw beginEx;
+			}
+		}
+//==========================================================================
+
+```
+
+
+
+##### 3.内层事务是SUPPORT，内层延用外部事务，没有的话，直接以非事务的方式运行。
+
+如果当前事务成功的话，外层事务失败的话，内层事务不会提交，外层事务统一回滚。
+
+如果当前事务出错的话，外层事务成功的话, 内层事务不会提交，外层事务统一回滚。
+
+如果当前事务成功的话，外层事务成功的话，内层事务不会提交，外层事务统一回滚。
+
+如果当前事务失败的话，外层事务失败的话，内层事务不会回滚，外层事务统一回滚。
+
+
+
+##### 4.内层事务是NOTSUPPORT，当前方法以非事务的方式运行，有外部事务的话,挂起外部事务。
+
+如果当前方法成功的话，外层事务也成功的话，外层事务提交。
+
+如果当前方法失败的话，外层事务直接回滚提交。
+
+如果外层方法失败的话，内层方法正常的话，内层方法不会回滚。外层事务会回滚。
+
+
+
+```java 
+  //内层事务为NOTSUPPORT的情况
+		if (definition.getPropagationBehavior() == TransactionDefinition.PROPAGATION_NOT_SUPPORTED) {
+			if (debugEnabled) {
+				logger.debug("Suspending current transaction");
+			}
+			Object suspendedResources = suspend(transaction);
+			boolean newSynchronization = (getTransactionSynchronization() == SYNCHRONIZATION_ALWAYS);
+			return prepareTransactionStatus(
+					definition, null, false, newSynchronization, debugEnabled, suspendedResources);
+		}
+```
+
+
+
+
+
+##### 5.当前事务是MANDATORY，当前延用外部事务，外层没有的话，直接抛出异常。
+
+如果当前事务成功的话，外层事务失败的话，内层事务不会提交，外层事务统一回滚。
+
+如果当前事务出错的话，外层事务成功的话, 内层事务不会提交，外层事务统一回滚。
+
+如果当前事务成功的话，外层事务成功的话，内层事务不会提交，外层事务统一回滚。
+
+如果当前事务失败的话，外层事务失败的话，内层事务不会回滚，外层事务统一回滚。
+
+
+
+#####6.当前事务是NEVER，外层不能有事务，否则当前直接抛出异常，没有的话，直接以非事务的方式运行。
+
+```java 
+	if (definition.getPropagationBehavior() == TransactionDefinition.PROPAGATION_NEVER) {
+			throw new IllegalTransactionStateException(
+					"Existing transaction found for transaction marked with propagation 'never'");
+		}
+```
+
+
+
+
+
+##### 7.当前事务时NESTED，直接延用外层事务，没有的话，直接创建一个新的事务运行
+
+**savepoint的使用** savepoint  x;  rollback to x;  x之前的不会被回滚，x之后的会被回滚.
+
+**和Required的区别**：
+
+如果当前事务延用了外部事务的话，在开始当前事务之前，会设置一个保存点，savePoint.
+
+在内层事务出错时，直接回滚到保存点.之后外层事务再回滚。
+
+在内层事务成功时，释放保存点，之后外层事务统一提交
+
+```java 
+//如果之前设置了保存点的话，那么会回滚到保存点.
+if (status.hasSavepoint()) {
+    if (status.isDebug()) {
+        logger.debug("Rolling back transaction to savepoint");
+    }
+    status.rollbackToHeldSavepoint();
+}
+//======================================================================
+//如果当前事务设置了保存点的话，释放保存点。
+if (status.hasSavepoint()) {
+    if (status.isDebug()) {
+        logger.debug("Releasing transaction savepoint");
+    }
+    unexpectedRollback = status.isGlobalRollbackOnly();
+    status.releaseHeldSavepoint();
+}
+//如果当前事务是新事务的话，直接提交
+else if (status.isNewTransaction()) {
+    if (status.isDebug()) {
+        logger.debug("Initiating transaction commit");
+    }
+    unexpectedRollback = status.isGlobalRollbackOnly();
+    doCommit(status);
+}
+//如果当前事务，不是新事务的话
+else if (isFailEarlyOnGlobalRollbackOnly()) {
+    unexpectedRollback = status.isGlobalRollbackOnly();
+}
+
+```
+
+
+
+如果当前事务成功的话，外层事务失败的话，内层事务不会提交但会释放保存点，外层事务统一回滚。
+
+如果当前事务出错的话，外层事务成功的话, 内层事务不会提交,内层事务回滚到savePoint.外层事务后续回滚。
+
+如果当前事务成功的话，外层事务成功的话，内层事务不会提交但会释放保存点，外层事务统一提交。
+
+如果当前事务失败的话，外层事务失败的话，内层事务回滚到savePoint，外层事务再回滚。
+
+
+
+
+
+
+
+### 2.外层事务是MANDATORY（外层必须有事务）
+
+外层必须有事务，否则抛出异常.
+
+
+
+### 3.外层事务是SUPPORTS（外层可以能有事务，也可能无事务）
+
+#####1.如果外层有事务的话，当前事务是Required，当前事务会延用外层事务。
+
+同上1
+
+
+
+#####2.如果外层有事务的话，当前事务是RequiredNew，当前事务另开新事务
+
+同上2
+
+
+
+
+
+#####3.如果外层有事务的话，当前事务是SUPPORT，当前事务延用外层事务
+
+同上1.
+
+
+
+
+
+#####4.如果外层有事务的话，当前事务是NOTSUPPORT，当前事务不会使用事务
+
+同上4
+
+
+
+##### 5.如果外层有事务的话，当前事务是MANDATORY，当前事务延用外层事务
+
+同上1
+
+
+
+##### 6.如果外层有事务的话，当前事务是NEVER，当前事务延用外层事务
+
+同上6
+
+#####7.如果外层有事务的话，当前事务是NESTED，当前事务延用外层事务
+
+
+
+同上1
+
+
+
+
+
+**总结1：required ,nested的区别：**在于回滚
+
+如果外部无事务的话，无区别。
+
+1. 如果外部有事务的话，当内层事务出现异常时，二者抛出的异常信息不同。
+
+2. 如果外部有事务的话，当内层事务出现异常，外层对内层进行手动捕捉时，required虽然捕获了异常，但是依然存在回滚标记。所以外层事务整体回滚。外层事务独有的也会回滚。
+
+	但是nested的话内层在回滚到保存点的过程会清除回滚标记。所以外层因为手动捕获内层的原因，而导致了外层事务单独的提交。
+
+```java 
+public void rollbackToSavepoint(Object savepoint) throws TransactionException {
+		ConnectionHolder conHolder = getConnectionHolderForSavepoint();
+		try {
+			conHolder.getConnection().rollback((Savepoint) savepoint);
+			//清除回滚标记
+			conHolder.resetRollbackOnly();
+		}
+		catch (Throwable ex) {
+			throw new TransactionSystemException("Could not roll back to JDBC savepoint", ex);
+		}
+	}
+```
+
+
+
+**总结1：requiredNew ,nested的区别：**在于控制内层事务
+
+如果外部无事务的话，无区别。
+
+1. 如果外部有事务的话，requiredNew相当于单独另开了事务，外层事务不会影响到内层事务。内外层单独提交，单独回滚。
+
+	但是nested的话，还是延用了外层事务。外层事务可以控制内层事务的回滚，就算内层事务没有异常，外层有异常的话，也可以全部回滚。
+
+
+
+
+
+
+
+
+
 
 
 
@@ -2787,7 +4044,6 @@ spring会在上下文关闭后触发GC 触发spring Bean的垃圾收集
 4.3 singletonFactories 三级
 
 一级缓存想要进入二级缓存的话，必须满足两个条件 1，一级缓存没有 2，对象正处于创建状态
-
 
 实例化A------>一到三级缓存检索A,未发现A开始创建A------------>将A转化成ObjectFactory并且放入singleFactories中去
 初始化A过程中,发现RunBeanReference B，一到三级缓存中检索B,未发现B，开始创建B

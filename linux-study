@@ -1,4 +1,5 @@
 ## 1.linux开关机
+
 关机命令:
 a,shutdown -h  + [关机时间] 正常关机
 b,halt 关闭内存
@@ -24,11 +25,11 @@ yum  search [] 搜索
 
 ## 3.linux 万物皆文件
 
-#### 1.linux 文件分类
+### 1.linux 文件分类
 
 1. 目录 d
 
-2. 文件 
+2. 普通 -
 
 3. 连接 软连接（相当与window的快捷方式），硬链接 （磁盘上同一份文件，两个不同的文件引用）
 
@@ -39,6 +40,402 @@ yum  search [] 搜索
 	软连接  快捷方式 删除源文件 不可使用
 
 4. 块设备
+
+5. 字符设备
+
+6. 管道 pipeline
+
+
+
+### 2.文件描述符（进程级别）
+
+1. 它是用户级别即进程层面的，每个进程维护自己的一套文件描述符表 0,1,2,3..........
+2. 内核将 0标准输入  1标准输出  2标准错误 固定
+3. 每个文件描述符还存储着一个文件描述符表对应位置的内存地址，可以找到系统文件描述符表对应的位置
+
+
+
+### 3.文件描述符表（系统级别）
+
+1. 它是系统级别的。没一条记录都对应一个iNode地址，文件偏移量，访问模式等等，通过它可以找到对应的INode
+
+
+
+### 4.INode表
+
+1. iNode节点 ，对应真实的文件物理存储地址
+2. 设置文件锁等等。
+
+
+
+
+
+## 4.Linux数据的零拷贝技术
+
+### 1.传统IO劣势
+
+磁盘到-------》内核内存----------》用户内存
+
+1. 复制数据消耗内存空间
+2. 用户内核的切换浪费CPU执行效率
+
+
+
+### 2.三种数据零拷贝
+
+#### 1.直接IO   用户直接将数据复制到磁盘，不经过内核缓存.
+
+**数据库管理系统**
+
+
+
+#### 2. 避免内核数据到用户数据之间的拷贝
+
+**代表：mmap**
+
+1. 内核维护一个用户地址映射成真正的物理内存地址的关系。用户通过访问映射的地址。从而间接访问到真正的物理地址.
+2. mmap并不会立即将磁盘文件加载到内存。而是访问内核内存，发现数据不存在，缺页异常，触发数据加载
+
+
+
+#### 3.避免内核数据到用户数据之间的拷贝，避免用户态到内核态的切换
+
+**代表：sendfile**
+
+1. 用户调用sendfile函数。内核直接加载磁盘数据到内核内存，然后发送给Socket缓存。再发送到网卡。
+
+**后续升级过后 内核内存直接发送给网卡，不经过Socket缓存**
+
+
+
+#### 4.读的时候不发生拷贝，一旦发生写的时候，立即拷贝一份新的数据，用于写
+
+**代表：copy-on-write **
+
+
+
+
+
+
+
+## 5.Linux   PageCache
+
+1. linux将物理内存映射成虚拟内存，用户访问虚拟内存，内核根据虚拟内存的映射找到真正的物理内存.
+
+2. linux 读取，写入磁盘的文件时，每次预先加载（以Page为单位，每页4byte）的数据加载到内核。
+
+	如果用户访问的蓄力内存的数据为空，那么发生缺页异常，主动加载磁盘数据到PageCache.
+
+3. 多个用户进程根据自己的FD来找到自己对相应文件的偏移量。
+
+4. 内核根据设置，每秒/每次访问/指定上线内存 将PageCache的数据持久化到磁盘
+
+5. 如果PageCache达到最大上限，那么内核LRU最长时间没有使用的策略，淘汰过时的PageCache  page.
+
+
+
+## 6.Linux内存映射
+
+1. 物理内存。实际主存。linux将内存分成一块(4kb)，一块。每块对应一个页框.二进制的高位页码值，低位偏移量。0x233(页码) 000（偏移量）  0x23(页码)  001 （偏移量）
+2. 虚拟内存。操作系统根据CPU寻址能力抽象出来的一块内存。32位的一般4GB。Linux将虚拟内存分成一块一块（4kb)，每块对应一个页 ，.二进制的高位页码值，低位偏移量。
+3. linux操作系统 维护一个页表，里面存放这页与页框的映射。根据里面的页码，能找到对应的页框
+4. 
+
+
+
+
+
+
+
+## 7.Java  NIO
+
+#### 1.ByteBuffer
+
+put 写入 pos+1
+
+get 读取  pos+1
+
+flip 读写转换 limit到写入的最大长度  pos移动至0
+
+get 读取
+
+compact 压缩  limit-compact的内容 复制到0-limit的区域  pos变为limit   limit变为capacity
+
+clear  pos变为0 limit 变为capacity  但是不改变byte数组实际内容
+
+
+
+
+
+
+
+## 8.Linux 网络IO
+
+### 1.linux socket 客户端服务端之间
+
+clientA -socket  port1==============>serverA-socekt port1
+
+clientB -socket  port2==============>serverA-socekt port1
+
+clientA -socket  port3==============>serverA-socekt port1
+
+clientA -socket  port4==============>serverA-socekt port1
+
+
+
+clientA -socket  port1==============>serverA-socekt port2
+
+clientB -socket  port2==============>serverA-socekt port2
+
+clientA -socket  port3==============>serverA-socekt port2
+
+clientA -socket  port4==============>serverA-socekt port2
+
+
+
+.....一台内核最多开65535端口
+
+根据四元组关系 可以开辟成千上万端口的关系
+
+
+
+### 2.linux server socket 服务
+
+server 启动 监听本端口socket
+
+client连接  第一次握手
+
+server ack 第二次握手
+
+client ack 第三次握手
+
+
+
+**重要参数BACKLOG  如果server 一直不accept 内核是不会把请求server的client-socket交给服务端的，客户端依然可以给服务端发送数据，但是这些数据都存在内核的Buffer中。缓存的socket数是**BACKLOG
+
+
+
+**如果服务端一直不accept,客户端疯狂发送数据，那么这些数据会被内核遗弃，不会进入缓存区**
+
+
+
+
+
+#### 1.重要参数：
+
+1. 缓存的socket数是BACKLOG+1
+
+2. tcpnodelay  是否延迟
+3.  ![img](https://upload-images.jianshu.io/upload_images/1002628-ac983702cd794f54?imageMogr2/auto-orient/strip|imageView2/2/format/webp) 
+4. sendBufferSize /receiveBuffersize  发送端，接受端 网络缓冲区的大小 数据只有只有超过缓冲区大小才会被真正发送/或者用户进程接收
+5. keepAlive:超过一定时间没有信息发送时，会发送一个心跳包，确认对方是否存活
+
+5. SoTimeout:设置socket调用InputStream读数据的超时时间，以毫秒为单位，如果超过这个时候，会抛出java.net.SocketTimeoutException。
+
+
+
+
+
+### 2.linux  java  bio socket
+
+java中的Socket  ServerSocket
+
+accept 阻塞
+
+recv 阻塞 需要单启动线程专门recv
+
+
+
+缺点：
+
+1. accept阻塞。没有请求过来的话，用户进程会一直阻塞下去，无法执行后面的业务流程
+2. recv也会阻塞。如果不单独开启线程读取内核缓冲区的数据的话，那么会影响后续accept流程。
+3. recv为了不影响accept clone出来的线程，占用了内存空间，频繁切换线程上下文，浪费CPU的执行效率.
+
+
+
+
+
+### 3.linux  java nio socket
+
+java中的SocketChannel   ServerSocketChannel
+
+accept 不阻塞，没有内核直接返回null
+
+recv 不阻塞，没有内核直接返回0
+
+优点：**这样就可以单线程完成accept接收客户端请求，与处理请求的工作，省去了clone 创建线程的内存，与线程切换的成本**
+
+1. 使用ServerSocketChannel 设置socketchannel.configureBlocking为false
+
+​    2.用户进程接收socketChannel 设置socketchannel.configureBlocking为false,这样保证了读取socket数据的非阻塞 int num = socketChannel.read(byteBuffer); 如果无数据直接返回0
+
+缺点：
+
+1. 客户端的每一个连接，用户都需要accept拿到连接的文件描述符，jvm用户需要保存之前已经拿到的文件描述符信息，每一次都是一个用户态进行系统调用切换内核态。线程上下文切换成本很高。
+2. 每次文件描述符的信息，都需要从内核的内存空间，复制到用户的内存空间。数据需要拷贝。如果很多的话，会占用很多时间.时间复杂度是O（n)
+
+
+
+### 4.linux  java  多路复用 socket 
+
+#### 1.selector,poll(需要配置JVM启动参数：)
+
+1. selector 用户进行select调用。将所有监听的文件描述符，复制到内核。内核对所有的文件描述符进行一个一个的遍历。如果存在，将有数据或者新的连接复制到用户进程。如果不存在，睡眠用户进程。一旦有数据或者连接的到来，唤醒用户进程，并且将所有的文件描述符复制到用户进程。
+
+优点：
+
+1. 每次用户进程系统调用select 一次性将所有客户端连接服务端监听端口的Socket文件描述符全部复制到用户进程，大大减少了每次accept 返回一个有关监听端口的Socket文件描述符.用户态向内核态切换的成本
+
+
+
+缺点:
+
+1. 如果所有客户端连接服务端监听端口的Socket文件描述符过多的话，时间复杂度是O(N),那么会进行内核到用户进程的数据复制过程。其中还会复制一些用户态已经accept连接的文件描述符，浪费了大量的内存空间。数据复制成本很高.
+
+	
+
+#### 2.epoll
+
+1. 用户进程注册要绑定的事件 epoll.create().
+2. 用户进程在内核开辟一块共享内存。内核维护一个红黑树。用户维护一个链表。epoll.ctl(),用户进程首次把所有要监听的文件描述符，传给内核。
+3. 如果有数据到来的话，内核直接将数据或者新的连接，拿到使用callback，传入共享内存的红黑树当中，并且用户可以通过共享内存的链表拿到。用户调用epoll.wait().直接可以获取到有数据或者新连接的文件描述符。并且复制数据通过mmap函数的方式。
+
+
+
+优点：
+
+1. 用户进程只需第一次复制所有要监听的文件描述符到内核，时间复杂度时0(1)
+2. 用户进程获取Socket中的数据是通过mmap函数。零拷贝。直接通过与内核的内存地址映射拿到数据，中间没有内核复制到用户的过程。
+
+缺点：
+
+1. epoll.ctl 需要在内核开辟一块内存空间。如果Socket文件描述符较少的话，那么这个的成本显得较高。
+
+
+
+
+
+java 中的selector 
+
+1. 使用ServerSocketChannel  创建Selector 
+
+2. ServerSocket register selector 注册事件类型 Selector.ACCEPT 接收连接
+
+	   通道触发了一个事件意思是该事件已经就绪。所以，某个channel成功连接到另一个服务器称为”连接就绪“。一个server socket channel准备号接收新进入的连接称为”接收就绪“。一个有数据可读的通道可以说是”读就绪“。等代写数据的通道可以说是”写就绪“。
+
+	SelectionKey.OP_CONNECT
+	SelectionKey.OP_ACCEPT
+	SelectionKey.OP_READ
+	SelectionKey.OP_WRITE
+
+3. selector.select()  返回所有满足事件的文件描述符  **如果不存在的话会阻塞**
+
+4. selectionKey.isAccept() 判断当前连接是否准备好读了
+
+5. selectionKey.isReadable() 判断当前连接是否可读。
+
+
+
+
+
+### 3.连接数据的读写
+
+1. 读的条件
+
+	1. 1. 连接已经accept就绪。
+		2. 服务端接收到客户端的数据了。
+
+	
+
+2. 写的条件 
+
+1.  内核的sendQueue没有达到上线。
+2.   服务端已经读完了客户端的请求，可以做出响应了。
+
+
+
+
+
+
+
+# 9.java 多线程 NIO的处理
+
+###最初设计
+
+####1.启动多个线程，每个线程负责持有一个Selector
+
+#### 2.创建一个SelectorGoup用户管理这些线程
+
+#### 3.设置负载均衡算法，每次发生一次网络IO事件，分配给一个Selector线程处理
+
+
+
+
+
+### 改进设计1
+
+#### 1.把accept的事件单独用一个线程处理，其他读写的IO事件负载均衡的交由此线程之外的线程组运行.
+
+
+
+### 改进设计2
+
+#### 1.创建多个SelctorGoup.每个SelectorGoup当中有多个线程。
+
+#### 2.把处理accept的事件交由单独一个SelctorGoup处理，负载均衡的分给这个组中的线程
+
+#### 3.其他IO事件负载均衡的交由其他SelectorGoup处理
+
+
+
+
+
+
+
+
+
+
+
+# 10.netty初级入门
+
+### 最初设计
+
+#### 1.设置EventLoopGroup,创建Socket.Socket注册Selector
+
+#### 2.设置事件处理器 Handler Handler如果需要被共享，需要添加@ShareAble注解
+
+####3.获得channel的PipeLine，将Handler在连接或者监听前注册进入PipeLine中
+
+###改进设计
+
+#### 1.设置EventLoopGroup,设置Bootstrap
+
+#### 2.将group注册Bootstrap,将SocketChannel注册到BootStap
+
+####3.设置Channelnitializer用户设置自定义Handler,并且也注册到BootStap
+
+####4.通过BootStrap连接或者监听
+
+
+
+
+
+
+
+
+
+##11.RPC 调用
+
+#### 1.定义远程调用接口
+
+#### 2.对接口进行动态代理，可以是JDK，cglib
+
+#### 3.动态代理的拦截中实现远程调用逻辑
+
+
+
+
 
 
 
@@ -147,11 +544,7 @@ export CLASSPATH=./JAVA_HOME/lib;$JAVA_HOME/jre/lib
 在shell的命令行下直接使用[export变量名=变量值]定义变量，该变量只在当前的shell(BASH)或其子shell(BASH)下是有效的，shell关闭了，变量也就失效了，再打开新shell时就没有这个变量，需要使用的话还需要重新定义。
 
 ===========================linux 防火墙 端口设置================
-1、firewall-cmd --zone=public --add-port=80/tcp --permanent  永久增加开放端口
 
-2、firewall-cmd  --reload 重启防火墙
-
-3、 firewall-cmd --list-port 查看所有开放端口
 ===========================linux sort命令======================================================
 sort 
 -b 忽略每行前面开始出的空格字符。

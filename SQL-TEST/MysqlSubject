@@ -1,0 +1,14 @@
+#####1.给定一张表，求N的数据
+
+ 查询成绩（grade）为第二名的所有学生，从下图数据可以看到，97分为分数第二，有三个学生成绩为第二，找出来。 
+
+```sql 
+Select a.grade from score group by grade order by a.grade desc limit 1,2;
+
+select b.id,b.name,b.grade from score b  where b.grade=(Select a.grade from score a group by grade order by a.grade desc limit 1,1);
+```
+
+
+
+
+

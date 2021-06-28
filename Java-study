@@ -1105,3 +1105,18 @@ private void set(ThreadLocal<?> key, Object value) {
     }
 ```
 
+
+
+
+
+## 6.JAVA System.getEnv System.getProperties  System.getProperty的区别
+
+1. 如果配置属性才能让System.getProperty(String)获取到?
+	使用java -D 配置系统属性.使用格式是:java -Dkey=value,如果value中有空格,则需要用双引号将该值括起来，如：-Dname="kazaf f"
+
+2. Systm.getenv()和System.getProperties()有何区别呢?
+	System.getenv()是获取系统环境变量，System.getProperties()是获取当前系统相关属性信息。 
+	System.getenv():返回当前系统环境的字符串Map,其是不可变的,环境变量是系统相关的键值对,从父进程传递到子进程.如:JAVA_HOME,PATH等 
+	System.getProperties():获取系统相关属性，比如：Java版本、操作系统信息、用户名等，这些跟JVM和操作系统相关的属性.如:java.version,os.name,user.dir,file.separator等
+
+
