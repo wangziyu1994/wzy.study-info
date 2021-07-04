@@ -31,6 +31,13 @@ condition.await()  condition.signal()  会唤醒进入指定等待队列池中�
 
 2.5栅栏:
 CountDownLatch CyclicBarrier  Phrase
+
+cyclicBarrier
+
+两种使用方式 
+
+new CyclicBarrier(int size,Runnable barrierAction)当到达栅栏时，有最后一个进入栅栏的线程执行任务.
+
 2.6交换:
 Exchanger
 

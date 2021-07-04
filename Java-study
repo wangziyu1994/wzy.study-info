@@ -896,7 +896,7 @@ final boolean acquireQueued(final Node node, int arg) {
 	 1. tryrelease方法会会释放锁，直到将state减至0
 	
 	2. 当锁状态被清空至0后，会将当前线程节点的waitstatus恢复至0，并且unpark队列的下一线程节点
-	
+
 	```java 
 	    public void unlock() {
 	        sync.release(1);
@@ -954,13 +954,14 @@ final boolean acquireQueued(final Node node, int arg) {
 	                if (t.waitStatus <= 0)
 	                    s = t;
 	        }
-        if (s != null)
+	    if (s != null)
 	            //如果队列中有下一节点的话，唤醒下一个线程
 	            LockSupport.unpark(s.thread);
 	    }
 	```
-	
-	
+
+
+​	
 
 
 
