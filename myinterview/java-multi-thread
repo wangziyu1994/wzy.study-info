@@ -271,3 +271,62 @@ synchronize 同步代码块(锁对象)
 
 
 解决方案：对单例对象加volatile  静止指令的重排序。
+
+
+
+##### 24.volatile关键字的作用
+
+1.保证内存的可见性。MESI 协议 利用CPU的嗅探机制 lock指令 保证数据读取 修改在每个线程内能真正及时同步到。
+
+2.设置内存屏障，防止CPU指令的重排序。 
+
+volatile 修饰的变量  volatile读 load指令从主内存拿，volatile写 store指令，将值，写入主存
+
+volatile读后面:    普通写，volateile写必须在此操作后面。LoadStoreBarrier.  普通读必须在此操作后面  StoreStoreBarrier
+
+volatile 写前面：普通写，volatile写必须先完成,StoreStoreBarrier.
+
+volatile 写后面:普通读，volatile读必须在此操作后面  StoreLoadBarrier
+
+![img](https://img2020.cnblogs.com/blog/1405595/202004/1405595-20200419153143481-487317979.png)
+
+
+
+##### 25.Lock相对于 Synchronized的优势？
+
+1. 不是同步代码块，用起来 相对灵活，可以跨方法比如。
+2. 不仅有非公平锁，还提供了公平锁。功能更加丰富
+3. 设有条件等待队列，可以通过ConitionObject await signal方法来完成线程之间的通信。
+4. tryLock 方法提供了乐观锁的一种实现。而synchronized只能是悲观锁。
+5. lockInterruptity可以让线程在获取锁的过程中，响应中断。抛出异常,快速失败.
+
+
+
+#### 26.CAS会产生什么问题?
+
+1. ABA问题 一个线程把预期值修改为另一个值，之后又马上修改还原回来为预期值。导致另一个线程CAS的操作，依然能成功。但是实际值已被修改。 
+
+	解决方案：这是版本号。每次修改 版本号自增。每次CAS比较版本号。版本号预期值符合才修改。 比如AtomicStampReference
+
+2. 高并发情况，大量CAS失败，占用CPU利用率。
+
+3. 无法对多个变量完成CAS原子操作
+
+
+
+#### 27.什么是死锁？
+
+线程A占有独占锁1，线程A尝试获取独占锁2.
+
+线程B占有独占锁2，线程B尝试获取独占锁1.
+
+两个线程互相持有对方对方需要的锁，造成死锁。阻塞。
+
+
+
+#### 28.死锁的互斥必要条件?
+
+
+
+#### 29.
+

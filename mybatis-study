@@ -1,0 +1,1288 @@
+# 一，Mybatis的使用
+
+### 1.全局配置文件
+
+1. 可以是resource 类路径下 或者url指定外部配置文件
+
+2. 可以是<property>标签指定
+
+3. 可以是SqlSessionFactory.build(config)传入 默认Properties对象
+
+	**优先级：build()------->外部配置文件----->property标签**
+
+	**从 MyBatis 3.4.2 开始，位符指定一个默认值。例如：${jdbc.user:root}**
+
+```xml 
+<properties resource="app.properties" url="">
+
+​    <property name="jdbc.driver" value="com.oracle.jdbc.Driver"/>
+
+</properties>
+```
+
+
+
+### 2.environment标签
+
+指定不同环境的数据源配置  通过default指定
+
+**也可以通过SqlFactoryBuileder.build()传入enviorment对象**
+
+```xml 
+<environments default="${default.environment}">
+<environment id="dev"></environment>
+    <environment id="sit"></environment>
+    <environment id="uat"></environment>
+</environments>
+```
+
+
+
+### 3.settings 标签
+
+```xml 
+<settings>
+<!-- 开启二级缓存-->
+  <setting name="cacheEnabled" value="true"/>
+  <!-- 开启驼峰命名适配-->
+  <setting name="mapUnderscoreToCamelCase" value="true"/>
+<settings>
+
+```
+
+
+
+### 4.tyAlias标签
+
+定义mapper文件类全限定类名的别名
+
+```xml 
+<typeAliases>
+    <typeAlias type="com.tuling.mybatis.dao.Account" alias="account"/>
+    <package name="com.tuling.mybatis.dao"  />
+</typeAliases>
+
+```
+
+
+
+### 5.typeHandler标签
+
+1. 执行类型处理器，将java类型转换为JDBC类型，或者将JDBC类型转化java类型,
+
+2. 自定一类型处理器继承BaseTyeHandler 重写里面的方法
+
+3. resultMap 或者 入参 #{ typeHandler="org.mybatis.example.ExampleTypeHandler"}
+
+@MappedJdbcTypes(JdbcType.TIMESTAMP)
+
+@MappedTypes(Long.class)
+
+```xml 
+<typeHandlers>
+  <typeHandler handler="org.mybatis.example.ExampleTypeHandler"  />
+</typeHandlers>
+
+```
+
+
+
+### 6.Mapper标签
+
+1. resource 类路径下获取mapper.xml文件
+
+2. url 资源定位符加载
+
+3. 基于class接口加载
+
+4. package 包下所有class
+
+	**mapper的namespace必须与接口的全限定类型一致**
+
+	**class,package加载时，接口名必须与mapper配置文件名保持一致**
+
+
+
+### 7.Mapper配置文件
+
+#### 1.select
+
+1. id:与Mapper接口的方法一致
+
+2. parameterType 入参java类型
+
+3. resultType  返回结果java类型
+
+4. resultMap 返回结果映射
+
+5. flushCache 是否刷新一级缓存 二级缓存
+
+6. useCache 是否保存至二级缓存
+
+7. timeout 10 操作超时时间
+
+8. statementType 可以是直接SQL statement 预编译SQL preparestatement 存储过程call
+
+	
+
+####2.insert/update/delete
+
+1. id:与Mapper接口的方法一致
+
+2. parameterType 入参java类型
+
+3. flushCache 是否刷新一级缓存 二级缓存
+
+4. timeout 20 操作超时时间
+
+5. statementType 可以是直接SQL statement 预编译SQL preparestatement 存储过程call
+
+6. keyProperty主键列对应的java类型 多个用逗号分隔
+
+7. keyColumn 主键列 多个用逗号分隔
+
+8. useGeneratedKeys 插入成功后，将值设回至原参数 
+
+	
+
+	
+
+	
+
+	#### 3.参数映射
+
+	1. 单个参数 参数可以是任意名称
+	2. 多个简单参数 #{arg0} #{arg1}..  #{param0}  #{param1}
+	3. 单个对象 对象属性 与对象属性名称对应#{name}
+	4. map key 引用
+	5. java1.8   -parameters 编译命令指定
+
+	
+
+	
+
+	#### 4.结果映射
+	
+	1. resultType
+	2. resultMap
+	
+	
+	
+	
+	
+	#### 5.嵌套结果映射
+	
+	1. 直接关联
+	
+		```xml 
+		<resultMap id="accountAndUser" type="com.tuling.mybatis.dao.Account">
+		    <id property="id" column="id"/>
+		    <association property="user" javaType="com.tuling.mybatis.dao.User">
+		        <id property="id" column="user_id"/>
+		        <result property="name" column="userName"/>
+		    </association>
+		</resultMap>
+		<select id="selectAccountAndUser" resultMap="accountAndUser">
+		    SELECT a.*, b.name userName from account a,user b where a.user_id=b.id
+		</select>
+		
+		```
+	
+		
+	
+	2. 外部select
+	
+		```xml 
+		<resultMap id="accountAndUser2" type="com.tuling.mybatis.dao.Account">
+		    <id property="id" column="id"/>
+		    <association property="user" javaType="com.tuling.mybatis.dao.User" select="selectUser"
+		                 column="user_id">
+		    </association>
+		</resultMap>
+		
+		<select id="selectUser" resultType="com.tuling.mybatis.dao.User">
+		    select * from user  where id = #{id}
+		</select>
+		
+		```
+
+3. 属性集合映射 collection
+
+
+
+
+
+# 二，Mybatis缓存的配置原理
+
+## 1.一级缓存(默认是开启的)
+
+#### 使用条件
+
+1. 相同的session中
+2. 相同的mapper的namespace 
+3. 相同的方法即 配置文件相同的id
+4. 相同的SQL statement 以及参数
+5. 查询之间没有增删改或者clearCache操作。
+6. sqlstatement 设置了flushCache=true 也会清除一级缓存
+
+
+
+注意 集成spring（使用mybatis-spring）时:
+
+- 每次查询spring会重新创建SqlSession，所以一级缓存是不生效的。
+- 而当开启事务时，spring会使用同一个SqlSession做查询，所以这个情况下一级缓存是生效的
+
+
+
+### 源码
+
+BaseExecutor 的query方法 PerpetualCache 里面的HashMap即为一级缓存
+
+1.判断是否从一级缓存获取，如果是的话，直接拿key 从Map获取，如果不是的话查询数据库，并且刷新缓存
+
+```java 
+public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+    ErrorContext.instance().resource(ms.getResource()).activity("executing a query").object(ms.getId());
+    if (closed) {
+      throw new ExecutorException("Executor was closed.");
+    }
+     //如果设置了flushCache=true 的话， ms.isFlushCacheRequired()=true则会清空缓存
+    if (queryStack == 0 && ms.isFlushCacheRequired()) {
+      clearLocalCache();
+    }
+    List<E> list;
+    try {
+      queryStack++;
+      //尝试从一级缓存中获取
+      list = resultHandler == null ? (List<E>) localCache.getObject(key) : null;
+      if (list != null) {//缓存中有
+        handleLocallyCachedOutputParameters(ms, key, parameter, boundSql);
+      } else {//缓存没有，直接从数据获取,查询成功后，还会放入一级缓存中去
+        list = queryFromDatabase(ms, parameter, rowBounds, resultHandler, key, boundSql);
+      }
+    } finally {
+      queryStack--;
+    }
+    if (queryStack == 0) {
+      for (DeferredLoad deferredLoad : deferredLoads) {
+        deferredLoad.load();
+      }
+      // issue #601
+      deferredLoads.clear();
+      if (configuration.getLocalCacheScope() == LocalCacheScope.STATEMENT) {
+        // issue #482
+        clearLocalCache();
+      }
+    }
+    return list;
+  }
+//=========================================================================
+
+```
+
+
+
+2. 填充新缓存，或者刷新旧有缓存
+
+	```java 
+	 private <E> List<E> queryFromDatabase(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql) throws SQLException {
+	    List<E> list;
+	    //先放入占位符
+	    localCache.putObject(key, EXECUTION_PLACEHOLDER);
+	    try {
+	      list = doQuery(ms, parameter, rowBounds, resultHandler, boundSql);
+	    } finally {
+	      //刷新旧有缓存
+	      localCache.removeObject(key);
+	    }
+	    //填充缓存
+	    localCache.putObject(key, list);
+	    //存储过程处理
+	    if (ms.getStatementType() == StatementType.CALLABLE) {
+	      localOutputParameterCache.putObject(key, parameter);
+	    }
+	    return list;
+	  }
+	```
+
+	3. 增删改的时候会清空缓存，导致一级缓存为空
+
+		BaseExecutor 的update方法 会清空map
+
+		```java 
+		public int update(MappedStatement ms, Object parameter) throws SQLException {
+		    ErrorContext.instance().resource(ms.getResource()).activity("executing an update").object(ms.getId());
+		    if (closed) {
+		      throw new ExecutorException("Executor was closed.");
+		    }
+		    //清除一级缓存
+		    clearLocalCache();
+		    return doUpdate(ms, parameter);
+		  }
+		```
+
+		
+
+
+
+### 2.二级缓存（默认不开启的）从MapperdStatement中获取
+
+1. 使用配置
+
+```java 
+<configuration>
+    <settings>
+    <setting name="cacheEnabled" value="true">
+    </settings>
+    </configuration>
+    <!--局部配置 每个mapper里面单独开启-->
+    <cache></cache>
+```
+
+
+
+2. 二级缓存对象的创建.
+
+	1. SqlSessionFactory.build方法  configurationElement解析mapper.xml文件的cache标签
+
+	2. XmlMapperBuilder.cacheElement()方法 构建 二级缓存对象
+
+	3.  builderAssistant.useNewCache(typeClass, evictionClass, flushInterval, size, readWrite, blocking, props); 传入构建缓存对象所需要的参数
+
+	4. 装饰者模式创建二级缓存对象 
+
+		base=new PreptualCache()-------->Map<Object, Object> cache = new HashMap<>(); 缓存真正的存储
+
+		cache=new LruCache(base)---------->LRU算法 淘汰缓存
+
+		cache=new ScheduledCache(cache)---------->定时清除缓存的
+
+		cache=new SerializedCache(cache)----------> 开启readwrite属性 缓存的深拷贝
+
+		cache=new LoggingCache(cache)---------->
+
+		cache=new SynchronizedCache(base)---------->线程安全性的 put get ...等方法
+
+		**最终被放入MapperStatement的currentCache属性当中**
+
+
+
+3.二级缓存的取出，放入
+
+1. 如果第一次查询，则初始化TransactionCache装饰者对象，传入基础构件MapperStatement的SynCache
+2. 查询数据库，把数据库对象暂时存入TransactionCache当中
+3. SqlSession.commit() 关闭会话的时候，真正向MapperStatement的SynCache传入数据库对象，用作缓存
+
+```java 
+
+// public <E> List<E> query(MappedStatement ms, Object parameterObject, RowBounds rowBounds, ResultHandler resultHandler, CacheKey key, BoundSql boundSql)
+      throws SQLException {
+    //从MappedStateMent获取二级缓存
+    Cache cache = ms.getCache();
+    if (cache != null) {
+      //如果设置了查询清空缓存时，清空缓存
+      flushCacheIfRequired(ms);
+      if (ms.isUseCache() && resultHandler == null) {
+        ensureNoOutParams(ms, boundSql);
+        @SuppressWarnings("unchecked")
+          //尝试从所有的二级缓存当中获取对象，如果不存在，并且创建TransactionalCache创建，放入TransactionalManager的HashMap之中
+        List<E> list = (List<E>) tcm.getObject(cache, key);
+        if (list == null) {
+          //查询数据库
+          list = delegate.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+          //暂时性的将数据库对像存入TransactionCache当中。等到之后commit关闭SqlSession之后再放入MapperStatement的二级缓存当中
+          tcm.putObject(cache, key, list); // issue #578 and #116
+        }
+        return list;
+      }
+    }
+    //为空的进入下一级查询，也就会进入一级缓存查询
+    return delegate.query(ms, parameterObject, rowBounds, resultHandler, key, boundSql);
+  }
+
+//=====================================================================
+public Object getObject(Cache cache, CacheKey key) {
+    //装饰者模式，一层一层进行获取
+    return getTransactionalCache(cache).getObject(key);
+  }
+
+  public void putObject(Cache cache, CacheKey key, Object value) {
+    //先放入TransationCache里面的缓存当中，等到会话提交，结束时，再清空自己，并且放入MappedStatement中的二级缓存对象之中
+    getTransactionalCache(cache).putObject(key, value);
+  }
+
+  public void commit() {
+    for (TransactionalCache txCache : transactionalCaches.values()) {
+      //将自己的缓存真正放入MappedStatement中的二级缓存对象之中
+      txCache.commit();
+    }
+  }
+
+  public void rollback() {
+    for (TransactionalCache txCache : transactionalCaches.values()) {
+      txCache.rollback();
+    }
+  }
+
+  private TransactionalCache getTransactionalCache(Cache cache) {
+    //如果不存在，则新创建TransationalCache并且放入transactionManager的Map当中
+    //TransactionCache(SynchronizedCache)装饰者模式，将MapperStatement中的SynCache传入
+    //但是TransactionCache是SqlSession级别的
+    return transactionalCaches.computeIfAbsent(cache, TransactionalCache::new);
+  }
+
+//========================================================================
+
+
+```
+
+
+
+4.二级缓存清除的条件
+
+1. xml中配置的update 不能清空 @CacheNamespace 中的缓存数据
+
+2. 只有修改会话提交之后 才会执行清空操作
+
+3. 任何一种增删改操作 都会清空整个namespace 中的缓存
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 三，Mybatis SqlSessionFactory的初始化
+
+**build(Propertis)的配置优先级最高------》外部配置文件第二---------><properties>**
+
+
+
+#### 1.创建XMLConfigBuilder对象，用于解析xml文件 XMLMapperBuilder对象，用于解析mapper文件
+
+```java 
+  XMLConfigBuilder parser = new XMLConfigBuilder(inputStream, environment, properties);
+//
+XMLMapperBuilder mapperParser = new XMLMapperBuilder(inputStream, configuration, resource, configuration.getSqlFragments());
+//if ("package".equals(child.getName())) {
+          String mapperPackage = child.getStringAttribute("name");
+          configuration.addMappers(mapperPackage);
+        } 
+```
+
+#### 2.将配置文件转化为Configuration对象
+
+```java 
+  public Configuration parse() {
+    if (parsed) {
+      throw new BuilderException("Each XMLConfigBuilder can only be used once.");
+    }
+    parsed = true;
+    parseConfiguration(parser.evalNode("/configuration"));
+    return configuration;
+  }
+```
+
+#### 3.转化Configuration对象的过程中寻找解析Mapper配置文件
+
+将Mapper配置文件,封装为MapperStatement对象，存入Map<String, MappedStatement> mappedStatements 中 其中key 为currentNamespace+statmentdid  也就是 mapper的namespace+sql标签的Id
+
+```java 
+   return currentNamespace + "." + base;
+```
+
+
+
+1. 可以传入Resource 路径,传入Class对象,传入Url对象
+
+	```java 
+	 private void mapperElement(XNode parent) throws Exception {
+	    if (parent != null) {
+	      for (XNode child : parent.getChildren()) {
+	          //注解配置的话，走以下解析
+	        if ("package".equals(child.getName())) {
+	          String mapperPackage = child.getStringAttribute("name");
+	          configuration.addMappers(mapperPackage);
+	        } else {
+	          String resource = child.getStringAttribute("resource");
+	          String url = child.getStringAttribute("url");
+	          String mapperClass = child.getStringAttribute("class");
+	          if (resource != null && url == null && mapperClass == null) {
+	            ErrorContext.instance().resource(resource);
+	            InputStream inputStream = Resources.getResourceAsStream(resource);
+	            XMLMapperBuilder mapperParser = new XMLMapperBuilder(inputStream, configuration, resource, configuration.getSqlFragments());
+	            mapperParser.parse();
+	          } else if (resource == null && url != null && mapperClass == null) {
+	            ErrorContext.instance().resource(url);
+	            InputStream inputStream = Resources.getUrlAsStream(url);
+	            XMLMapperBuilder mapperParser = new XMLMapperBuilder(inputStream, configuration, url, configuration.getSqlFragments());
+	            mapperParser.parse();
+	          } else if (resource == null && url == null && mapperClass != null) {
+	            Class<?> mapperInterface = Resources.classForName(mapperClass);
+	            configuration.addMapper(mapperInterface);
+	          } else {
+	            throw new BuilderException("A mapper element may only specify a url, resource or class, but not more than one.");
+	          }
+	        }
+	      }
+	    }
+	  }
+	```
+
+
+2. 解析Select ,update,delete,insert标签
+
+	```java 
+	 //解析mapper文件里面的增删改查标签
+	      buildStatementFromContext(context.evalNodes("select|insert|update|delete"));
+	
+	//=========================================================================
+	private void buildStatementFromContext(List<XNode> list) {
+	    //获取不同数据库的dbId
+	    if (configuration.getDatabaseId() != null) {
+	      buildStatementFromContext(list, configuration.getDatabaseId());
+	    }
+	    buildStatementFromContext(list, null);
+	  }
+	//=============================================
+	 private void buildStatementFromContext(List<XNode> list, String requiredDatabaseId) {
+	    for (XNode context : list) {
+	      final XMLStatementBuilder statementParser = new XMLStatementBuilder(configuration, builderAssistant, context, requiredDatabaseId);
+	      try {
+	        statementParser.parseStatementNode();
+	      } catch (IncompleteElementException e) {
+	        configuration.addIncompleteStatement(statementParser);
+	      }
+	    }
+	  }
+	```
+
+	
+
+
+
+#### 4.正式创建SqlSessionFactory(DefaultSqlSessionFactory)对象，并且将Configuration赋值到SqlSessionFactory
+
+```java 
+ return build(parser.parse());
+//============================================
+ public SqlSessionFactory build(Configuration config) {
+    return new DefaultSqlSessionFactory(config);
+  }
+//================================================
+public DefaultSqlSessionFactory(Configuration configuration) {
+    this.configuration = configuration;
+  }
+```
+
+
+
+
+
+
+
+
+
+## 2.Mybatis SqlSession的创建  SqlSessionFactory.openSession() (DefaultSqlSession)
+
+###1.openSession创建DefaultSession对象
+
+```java 
+ public SqlSession openSession() {
+    return openSessionFromDataSource(configuration.getDefaultExecutorType(), null, false);
+  }
+//===================================================================================
+
+```
+
+
+
+
+
+### 2.创建Executor对象
+
+1. executor 类型 SIMPLE  REUSE  BATCH    默认  SIMPLE
+
+
+
+####1.executor  代理部分逻辑的配置文件解析
+
+```java 
+ //解析xml  plugin元素，主要是对mybatis的执行器进行动态代理，方便拓展功能
+      pluginElement(root.evalNode("plugins"));
+//========================================================
+private void pluginElement(XNode parent) throws Exception {
+    if (parent != null) {
+      for (XNode child : parent.getChildren()) {
+        //获取动态代理定义的Interceptor,方便用户进行自己的拓展功能
+        String interceptor = child.getStringAttribute("interceptor");
+        Properties properties = child.getChildrenAsProperties();
+        Interceptor interceptorInstance = (Interceptor) resolveClass(interceptor).getDeclaredConstructor().newInstance();
+        interceptorInstance.setProperties(properties);
+        //将拦截部分放入Configuration中，后续直接代理
+        configuration.addInterceptor(interceptorInstance);
+      }
+    }
+  }
+```
+
+
+
+#### 2.executor 对象的正式创建
+
+```java 
+private SqlSession openSessionFromDataSource(ExecutorType execType, TransactionIsolationLevel level, boolean autoCommit) {
+    Transaction tx = null;
+    try {
+      //获取配置文件的环境对象
+      final Environment environment = configuration.getEnvironment();
+      //获取事务创建工厂对象
+      final TransactionFactory transactionFactory = getTransactionFactoryFromEnvironment(environment);
+      //根据事务工厂对象创建事务对象
+      tx = transactionFactory.newTransaction(environment.getDataSource(), level, autoCommit);
+      //创建执行器对象
+      final Executor executor = configuration.newExecutor(tx, execType);
+      //将执行器，Configuration  传入DefaultSqlSession对象。
+      return new DefaultSqlSession(configuration, executor, autoCommit);
+    } catch (Exception e) {
+      closeTransaction(tx); // may have fetched a connection so lets call close()
+      throw ExceptionFactory.wrapException("Error opening session.  Cause: " + e, e);
+    } finally {
+      ErrorContext.instance().reset();
+    }
+  }
+
+//=====================================================================
+  public Executor newExecutor(Transaction transaction, ExecutorType executorType) {
+    executorType = executorType == null ? defaultExecutorType : executorType;
+    executorType = executorType == null ? ExecutorType.SIMPLE : executorType;
+    Executor executor;
+    //根据不同的执行器类型，创建不同的执行器对象
+    if (ExecutorType.BATCH == executorType) {
+      executor = new BatchExecutor(this, transaction);
+    } else if (ExecutorType.REUSE == executorType) {
+      executor = new ReuseExecutor(this, transaction);
+    } else {
+      //SimpleExector当中创建了BaseExecutor并且创建了一级缓存PreptualCache
+      executor = new SimpleExecutor(this, transaction);
+    }
+    //如果开启二级缓存的话，那么根据装饰者模式加一层CacheExecutor为二级缓存服务
+    if (cacheEnabled) {
+      executor = new CachingExecutor(executor);
+    }
+    //拦截Executor对象，方便用户进行代理，拓展功能
+    executor = (Executor) interceptorChain.pluginAll(executor);
+    return executor;
+  }
+```
+
+
+
+3.动态代理exector,实现用户的拓展功能,默认JDK的动态代理
+
+```java 
+ public Object pluginAll(Object target) {
+    //根据用户定义的Interecptors,默认进行JDK动态代理。方便用户拓展自己的功能
+    for (Interceptor interceptor : interceptors) {
+      target = interceptor.plugin(target);
+    }
+    return target;
+  }
+```
+
+
+
+
+
+### 3.DefaultSqlSession创建完毕
+
+```java 
+ //将执行器，Configuration  传入DefaultSqlSession对象。
+      return new DefaultSqlSession(configuration, executor, autoCommit);
+```
+
+
+
+
+
+
+
+## 3.SQL语句的执行
+
+#### 1.需要JDBC 的Statement对象
+
+mybatis通过StatementHandler(也是装饰者模式)来创建不同的Statement对象
+
+```java 
+ public RoutingStatementHandler(Executor executor, MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
+
+    switch (ms.getStatementType()) {
+      case STATEMENT:
+        delegate = new SimpleStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+        break;
+      case PREPARED:
+        delegate = new PreparedStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+        break;
+      case CALLABLE:
+        delegate = new CallableStatementHandler(executor, ms, parameter, rowBounds, resultHandler, boundSql);
+        break;
+      default:
+        throw new ExecutorException("Unknown statement type: " + ms.getStatementType());
+    }
+
+  }
+//================================================
+public Statement prepare(Connection connection, Integer transactionTimeout) throws SQLException {
+    ErrorContext.instance().sql(boundSql.getSql());
+    Statement statement = null;
+    try {
+      statement = instantiateStatement(connection);
+      setStatementTimeout(statement, transactionTimeout);
+      setFetchSize(statement);
+      return statement;
+    } catch (SQLException e) {
+      closeStatement(statement);
+      throw e;
+    } catch (Exception e) {
+      closeStatement(statement);
+      throw new ExecutorException("Error preparing statement.  Cause: " + e, e);
+    }
+  }
+```
+
+
+
+
+
+#### 2.需要传入执行的SQL语句
+
+mybatis 通过创建BoundSQL对象来解析用户定义的SQL语句
+
+```java 
+ //获取用户定义的SQL语句，转化为BoundSQl对象
+    if (boundSql == null) { // issue #435, get the key before calculating the statement
+      generateKeys(parameterObject);
+      //创建BoundSQL
+      boundSql = mappedStatement.getBoundSql(parameterObject);
+    }
+```
+
+
+
+#### 3.需要解析传入用户定义的参数值，如填充占位符实际的值
+
+mybatis通过parameterHandler对象来解析用户传入的参数值
+
+```java 
+    //创建ParamHandler对象，解析入参
+    this.parameterHandler = configuration.newParameterHandler(mappedStatement, parameterObject, boundSql);
+```
+
+
+
+#### 4.需要将用户的参数类型，转化为JDBC类型
+
+mybatis通过TypeHandler对象将用户参数类型，转化为JDBC类型.
+
+```java 
+    //获取类型转换器，将参数对象，转化为对应的JDBC类型
+          TypeHandler typeHandler = parameterMapping.getTypeHandler();
+          JdbcType jdbcType = parameterMapping.getJdbcType();
+          if (value == null && jdbcType == null) {
+            jdbcType = configuration.getJdbcTypeForNull();
+          }
+          try {
+            typeHandler.setParameter(ps, i + 1, value, jdbcType);
+```
+
+
+
+
+
+#### 5.需要解析JDBC返回的ResultSet，并且返回用户想要的类型
+
+mybatis通过resultSetHandler对象来解析JDBC 返回的ResultSet。同时ResultHandler也会用TypeHandler来转换JDBC类型
+
+```java 
+    //创建ResultHandler对象，解析返回的结果集对象
+    this.resultSetHandler = configuration.newResultSetHandler(executor, mappedStatement, rowBounds, parameterHandler, resultHandler, boundSql);
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###2.调用select update delete insert方法
+
+全部转化为Executor的执行方法
+
+executor.delgate调用增删改查方法
+
+
+
+#### 3.调用Mapper对象
+
+##### 1.利用JDK的动态代理生成Mapper的代理对象
+
+##### 2.根据MapperProxy的invoke方法调用执行指定的SQL语句
+
+##### 3.预编译SQL
+
+将#{}转换为'参数值'
+
+将${}转化为 原参数值
+
+```java 
+
+```
+
+
+
+## 4.Mybatis插件开发
+
+ //拦截Executor对象，方便用户进行代理，拓展功能
+    executor = (Executor) interceptorChain.pluginAll(executor);  在此处pluginAll方法中
+
+主要有4个拦截的地方
+
+1. executorHandler
+2. parameterHandler
+3. statementHandler
+4. ResultSetHander
+
+```java 
+//====================InterceptorChain===================================  
+public Object pluginAll(Object target) {
+    //根据用户定义的Interecptors,默认进行JDK动态代理。方便用户拓展自己的功能
+    for (Interceptor interceptor : interceptors) {
+      target = interceptor.plugin(target);
+    }
+    return target;
+  }
+//=====================Inteceptor======================================
+  default Object plugin(Object target) {
+    return Plugin.wrap(target, this);
+  }
+//======================Plugin=========================================
+  public static Object wrap(Object target, Interceptor interceptor) {
+    Map<Class<?>, Set<Method>> signatureMap = getSignatureMap(interceptor);
+    Class<?> type = target.getClass();
+    Class<?>[] interfaces = getAllInterfaces(type, signatureMap);
+    if (interfaces.length > 0) {
+      return Proxy.newProxyInstance(
+          type.getClassLoader(),
+          interfaces,
+          new Plugin(target, interceptor, signatureMap));
+    }
+    return target;
+  }
+//==================================================================
+  @Override
+  public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    try {
+      Set<Method> methods = signatureMap.get(method.getDeclaringClass());
+      if (methods != null && methods.contains(method)) {
+        return interceptor.intercept(new Invocation(target, method, args));
+      }
+      return method.invoke(target, args);
+    } catch (Exception e) {
+      throw ExceptionUtil.unwrapThrowable(e);
+    }
+  }
+```
+
+
+
+具体实现 ：
+
+1. 自定义好Inteceptor的实现类，里面用@Intecepts(@Signal())指定好要拦截的类与方法.
+2. intecetpor实现类中定义好自己需要拓展的逻辑代码
+3. 将实现类加入mybatis全部配置文件中的plugin中
+
+
+
+
+
+
+
+# 四，Mybatis与Spring的集成
+
+#### 1.Spring利用自身的FactoryBean对mybatis进行集成 SqlSessionFactoryBean和MapperFactoryBean
+
+通过spring对factoryBean 的getObject方法调用返回自定创建的对象。默认也是单例的，一级工厂实际存入的是factoryBean对象，真正的对象存储在factoryCacheMap里面
+
+
+
+#### 2.SqlSessionFactoryBean的创建，创建DefaultSqlSessionFactory对象以及SqlSessionTemplate对象
+
+spring property标签依赖注入会调用此类的set方法从而创建SqlSessionTemplate对象
+
+```xml 
+<property name="sqlSessionFactory" ref="WzySqlSessionFactoryBean"></property>
+```
+
+```java 
+  
+public void setSqlSessionFactory(SqlSessionFactory sqlSessionFactory) {
+    if (!this.externalSqlSession) {
+      this.sqlSession = new SqlSessionTemplate(sqlSessionFactory);
+    }
+  }
+```
+
+
+
+
+
+#### 3.MapperFactoryBean的创建动态代理，注入SqlSessionTemplate
+
+```java 
+//===================MapFactoryBean===================================
+public T getObject() throws Exception {
+    return getSqlSession().getMapper(this.mapperInterface);
+  }
+//====================SqlSessionTemplate=============================
+  @Override
+  public <T> T getMapper(Class<T> type) {
+    return getConfiguration().getMapper(type, this); //此时的this是SqlSessiontempate
+  }
+//===================Configuration==============================================
+public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+    return mapperRegistry.getMapper(type, sqlSession);
+  }
+//====================MapperRegistry============================================
+  public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
+    final MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory<T>) knownMappers.get(type);
+    if (mapperProxyFactory == null) {
+      throw new BindingException("Type " + type + " is not known to the MapperRegistry.");
+    }
+    try {
+      return mapperProxyFactory.newInstance(sqlSession);
+    } catch (Exception e) {
+      throw new BindingException("Error getting mapper instance. Cause: " + e, e);
+    }
+  }
+//===================MapperProxyFactory========================================
+public T newInstance(SqlSession sqlSession) {
+    final MapperProxy<T> mapperProxy = new MapperProxy<>(sqlSession, mapperInterface, methodCache);
+    return newInstance(mapperProxy);
+  }
+protected T newInstance(MapperProxy<T> mapperProxy) {
+    return (T) Proxy.newProxyInstance(mapperInterface.getClassLoader(), new Class[] { mapperInterface }, mapperProxy);
+  }
+//==================MapperProxy===============================================
+public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+    try {
+      if (Object.class.equals(method.getDeclaringClass())) {
+        return method.invoke(this, args);
+      } else {
+        return cachedInvoker(method).invoke(proxy, method, args, sqlSession);
+      }
+    } catch (Throwable t) {
+      throw ExceptionUtil.unwrapThrowable(t);
+    }
+  }
+private MapperMethodInvoker cachedInvoker(Method method) throws Throwable {
+    //实际获取缓存的cachedInvoker对象
+    try {
+      // A workaround for https://bugs.openjdk.java.net/browse/JDK-8161372
+      // It should be removed once the fix is backported to Java 8 or
+      // MyBatis drops Java 8 support. See gh-1929
+      MapperMethodInvoker invoker = methodCache.get(method);
+      if (invoker != null) {
+        return invoker;
+      }
+
+      return methodCache.computeIfAbsent(method, m -> {
+        if (m.isDefault()) {
+          try {
+            if (privateLookupInMethod == null) {
+              return new DefaultMethodInvoker(getMethodHandleJava8(method));
+            } else {
+              return new DefaultMethodInvoker(getMethodHandleJava9(method));
+            }
+          } catch (IllegalAccessException | InstantiationException | InvocationTargetException
+              | NoSuchMethodException e) {
+            throw new RuntimeException(e);
+          }
+        } else {
+          //一般时候用到的methodInvoker
+          return new PlainMethodInvoker(new MapperMethod(mapperInterface, method, sqlSession.getConfiguration()));
+        }
+      });
+    } catch (RuntimeException re) {
+      Throwable cause = re.getCause();
+      throw cause == null ? re : cause;
+    }
+  }
+
+//=============MapperProxy.PlainMethodInvoker=============================
+private static class PlainMethodInvoker implements MapperMethodInvoker {
+    private final MapperMethod mapperMethod;
+
+    public PlainMethodInvoker(MapperMethod mapperMethod) {
+      super();
+      this.mapperMethod = mapperMethod;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+      return mapperMethod.execute(sqlSession, args);
+    }
+  }
+```
+
+
+
+
+
+#### 3.Spring的mapper在进行不在同一事务的情况增删改查操作时，需要一个SqlSession,Spring创建了SqlSessionTemplate对象实现SqlSession接口。实际用的是SqlSessionTemplate对象的一个重要属性SqlSessionProxy进行实际操作的，这个对象也是进行动态代理进行生成的，它在每次增删改查操作时调用Invoke方法，里面重新生成了一个SqlSession的实现类对象实际进行数据库操作，因此Mapper的每一次增删改查都是用的一个全新的SqlSession实现类对象.用完之后，都会closeSqlSession.同一个事务的话则不同。
+
+
+
+```java 
+//=========================SqlSessionTemplate====================================
+public SqlSessionTemplate(SqlSessionFactory sqlSessionFactory, ExecutorType executorType,
+      PersistenceExceptionTranslator exceptionTranslator) {
+
+    notNull(sqlSessionFactory, "Property 'sqlSessionFactory' is required");
+    notNull(executorType, "Property 'executorType' is required");
+
+    this.sqlSessionFactory = sqlSessionFactory;
+    this.executorType = executorType;
+    this.exceptionTranslator = exceptionTranslator;
+    this.sqlSessionProxy = (SqlSession) newProxyInstance(
+        SqlSessionFactory.class.getClassLoader(),
+        new Class[] { SqlSession.class },
+        new SqlSessionInterceptor());
+  }
+//=======================SqlSessionIntecptor==================================
+ private class SqlSessionInterceptor implements InvocationHandler {
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+      SqlSession sqlSession = getSqlSession(
+          SqlSessionTemplate.this.sqlSessionFactory,
+          SqlSessionTemplate.this.executorType,
+          SqlSessionTemplate.this.exceptionTranslator);
+      try {
+        Object result = method.invoke(sqlSession, args);
+        if (!isSqlSessionTransactional(sqlSession, SqlSessionTemplate.this.sqlSessionFactory)) {
+          // force commit even on non-dirty sessions because some databases require
+          // a commit/rollback before calling close()
+          sqlSession.commit(true);
+        }
+        return result;
+      } catch (Throwable t) {
+        Throwable unwrapped = unwrapThrowable(t);
+        if (SqlSessionTemplate.this.exceptionTranslator != null && unwrapped instanceof PersistenceException) {
+          // release the connection to avoid a deadlock if the translator is no loaded. See issue #22
+          closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+          sqlSession = null;
+          Throwable translated = SqlSessionTemplate.this.exceptionTranslator.translateExceptionIfPossible((PersistenceException) unwrapped);
+          if (translated != null) {
+            unwrapped = translated;
+          }
+        }
+        throw unwrapped;
+      } finally {
+        if (sqlSession != null) {
+          closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+        }
+      }
+    }
+  }
+//======================SqlSessionUtils=====================================
+ public static SqlSession getSqlSession(SqlSessionFactory sessionFactory, ExecutorType executorType, PersistenceExceptionTranslator exceptionTranslator) {
+
+    notNull(sessionFactory, NO_SQL_SESSION_FACTORY_SPECIFIED);
+    notNull(executorType, NO_EXECUTOR_TYPE_SPECIFIED);
+
+    SqlSessionHolder holder = (SqlSessionHolder) TransactionSynchronizationManager.getResource(sessionFactory);
+
+    SqlSession session = sessionHolder(executorType, holder);
+    if (session != null) {
+      return session;
+    }
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug("Creating a new SqlSession");
+    }
+
+    session = sessionFactory.openSession(executorType);
+
+    registerSessionHolder(sessionFactory, executorType, exceptionTranslator, session);
+
+    return session;
+  }
+```
+
+
+
+
+
+
+
+#### 4.spring-mybatis事务的管理
+
+1. spring-mybatis 事务的处理上，在创建SqlSessionFactory的时候就是创建了一个SpringManagerTransactionFactory来创建事务对象.事务的提交交由springTranactionManager管理
+
+	```java 
+	//====================SqlSessionFactoryBean.buildSqlSessionFactory() 
+	if (this.transactionFactory == null) {
+	    this.transactionFactory = new SpringManagedTransactionFactory();
+	}
+	
+	configuration.setEnvironment(new Environment(this.environment, this.transactionFactory, this.dataSource));
+	```
+
+	
+
+
+
+2. spring-mybatis在创建SqlSession时，会向TransactionManager 里面的resource ThreadLocal变量寻找以DefaultSqlSessionFactory为键的值，如果没有的话，会新建一个SqlSession,并且会存入那个ThreadLocal变量当中。操作完成后，看是否处于事务的状态，如果是的话，仅仅释放SqlSession,并不关闭。第二次操作时，会拿到ThreadLocal当中这个SqlSession的值，并且直接复用此SqlSession. 
+
+```java 
+//====================SqlSessionTemplate=====================================
+public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+      SqlSession sqlSession = getSqlSession(
+          SqlSessionTemplate.this.sqlSessionFactory,
+          SqlSessionTemplate.this.executorType,
+          SqlSessionTemplate.this.exceptionTranslator);
+      try {
+        Object result = method.invoke(sqlSession, args);
+        if (!isSqlSessionTransactional(sqlSession, SqlSessionTemplate.this.sqlSessionFactory)) {
+          // force commit even on non-dirty sessions because some databases require
+          // a commit/rollback before calling close()
+          sqlSession.commit(true);
+        }
+        return result;
+      } catch (Throwable t) {
+        Throwable unwrapped = unwrapThrowable(t);
+        if (SqlSessionTemplate.this.exceptionTranslator != null && unwrapped instanceof PersistenceException) {
+          // release the connection to avoid a deadlock if the translator is no loaded. See issue #22
+          closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+          sqlSession = null;
+          Throwable translated = SqlSessionTemplate.this.exceptionTranslator.translateExceptionIfPossible((PersistenceException) unwrapped);
+          if (translated != null) {
+            unwrapped = translated;
+          }
+        }
+        throw unwrapped;
+      } finally {
+        if (sqlSession != null) {
+          closeSqlSession(sqlSession, SqlSessionTemplate.this.sqlSessionFactory);
+        }
+      }
+    }
+  }
+//====================SqlSessionUtils====================================== 
+public static SqlSession getSqlSession(SqlSessionFactory sessionFactory, ExecutorType executorType, PersistenceExceptionTranslator exceptionTranslator) {
+
+    notNull(sessionFactory, NO_SQL_SESSION_FACTORY_SPECIFIED);
+    notNull(executorType, NO_EXECUTOR_TYPE_SPECIFIED);
+
+    SqlSessionHolder holder = (SqlSessionHolder) TransactionSynchronizationManager.getResource(sessionFactory);
+
+    SqlSession session = sessionHolder(executorType, holder);
+    if (session != null) {
+      return session;
+    }
+
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug("Creating a new SqlSession");
+    }
+
+    session = sessionFactory.openSession(executorType);
+
+    registerSessionHolder(sessionFactory, executorType, exceptionTranslator, session);
+
+    return session;
+  }
+
+//=======================SqlSessionUtils=====================================
+public static void closeSqlSession(SqlSession session, SqlSessionFactory sessionFactory) {
+    notNull(session, NO_SQL_SESSION_SPECIFIED);
+    notNull(sessionFactory, NO_SQL_SESSION_FACTORY_SPECIFIED);
+
+    SqlSessionHolder holder = (SqlSessionHolder) TransactionSynchronizationManager.getResource(sessionFactory);
+    if ((holder != null) && (holder.getSqlSession() == session)) {
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("Releasing transactional SqlSession [" + session + "]");
+      }
+      holder.released();
+    } else {
+      if (LOGGER.isDebugEnabled()) {
+        LOGGER.debug("Closing non transactional SqlSession [" + session + "]");
+      }
+      session.close();
+    }
+  }
+
+
+```
+
+
+
+3.mybatis 和spring整合时，直接复用了spring 事务的处理 aop代理事务标注的方法，在DynamicInteceptor里面存储了spring对事务处理的方式.详情见spring事务的处理。
+
+
+
+
+
+**注意：如果是事务的话，那么坑定需要用到同一个SqlSession,因此Spring用了TheadLocal对象存储SqlSession，如果是同一个事务的话，那么从当前线程复用之前的SqlSession即可。详细参考spring事务的处理，默认情况不指定，一个SQL就是一个事务**
+
+
+
+
+
+```java 
+
+```
+
+
+
+SqlSessionTemplate接口中又存在一个SqlSessionProxy对象是对SqlSession接口的一个动态代理对象

@@ -1,3 +1,2316 @@
+#  单服务架构 模块
+
+1. 单个服务包含众多功能模块。开发维护成本高。
+
+2. 可用性差，某个模块出问题，可能导致所有服务不可用。
+
+	
+
+**把各个功能拆分出多个进程，每个进程相互独立不受影响**
+
+
+
+微服务拆分产生的问题？
+
+1. 如何保持微服务之间的通信？
+2. 如何解决数据一致性问题
+3. 系统监控等等
+
+
+
+
+
+# SpringCloud 模块
+
+## 1,注册中心
+
+####a,服务间调用问题：
+
+1. 采用硬编码方式的发送http远程调用，问题：如果服务端是集群的话，需要手动添加大量节点。
+2. 客户端手动维护一份服务端的IP列表，问题:如果服务列表中，某一服务宕机的话，请求交易失败。
+3. 利用nginx作反向代理，ngix自动过滤出不可用的服务端 问题：如果由成千上万的服务，导致nginx的配置文件upStream过于复杂，不易维护.
+4. 采用注册中心的服务架构
+
+
+
+#### b,注册中心的一般架构
+
+1. 注册中心持久化一份服务端列表。
+2. 服务端每次启动成功之后，向注册中心注册将自己注册到服务端列表当中去，客户端访问注册中心的服务端列表。进行远程调用。
+3. 注册中心提供心跳接口，服务端定时通过心跳接口，发送心跳信息到注册中心。如果超过一定时间没有收到心跳。注册中心，把注册的服务信息去除。
+4. 注册中心提供注销接口。服务端主动下线的话，调用注销接口。主动去除自己的服务实例信息。
+
+
+
+#### c.应用实例：Nacos
+
+####1.入门应用
+
+1. 引入alibaba springcloud nacos discovery  starters包 自动注入nacos作为注册 中心的相关Bean配置
+
+2. application.properties 配置好spring.cloud.nacos.discovery的相关值
+3. 启动过后服务注册到nacos注册中心服务端。
+
+
+
+#### 2.注册中心消费服务的负载均衡
+
+##### 1.交给nginx负载均衡,nginx存储注册中心可用服务端相关配置
+
+##### 2.消费端自身控制消费的负载均衡
+
+spring-cloud 默认提供ribbon框架包含丰富的负载均衡策略算法实现。而且还可以自定义负载均衡策略。
+
+
+
+#### 3.nacos源码
+
+####a,nacos客户端向服务端注册自身实例信息
+
+1. 入口:NacosDiscoveryAutoConfiguration 利用springboot 的spring.factories加载机制 会import此类
+
+2. NacosDiscoveryAutoConfiguration 加载了一堆核心Bean的BD之后实例化产生核心对象包括：NacosAutoServiceRegistration，此对象里面包含NacosServiceRegistry，它包含了配置文件中nacos有关本服务的一些相关信息.
+
+3. NacosAutoServiceRegistration 实现 AbstractAutoServiceRegistration 实现ApplicationListener<WebServerInitializedEvent> ，因此在WebServer初始化完成事件之后，会触发此监听器.
+
+4. 监听器触发内容 
+
+  1. nacos-client 启动定时线程池，默认每5秒过后 提交发送心跳任务给nacos服务端
+  2. nacos-client 将配置自身实例注册到nacos服务端
+
+  ```java 
+  //====================NacosAutoServiceRegistration ==============================
+  public void onApplicationEvent(WebServerInitializedEvent event) {
+  		bind(event);
+  	}
+  public void bind(WebServerInitializedEvent event) {
+  		ApplicationContext context = event.getApplicationContext();
+  		if (context instanceof ConfigurableWebServerApplicationContext) {
+  			if ("management".equals(((ConfigurableWebServerApplicationContext) context)
+  					.getServerNamespace())) {
+  				return;
+  			}
+  		}
+  		this.port.compareAndSet(0, event.getWebServer().getPort());
+  		this.start();
+  	}
+  
+  //================================================================================
+  public void start() {
+  		if (!isEnabled()) {
+  			if (logger.isDebugEnabled()) {
+  				logger.debug("Discovery Lifecycle disabled. Not starting");
+  			}
+  			return;
+  		}
+  
+  		// only initialize if nonSecurePort is greater than 0 and it isn't already running
+  		// because of containerPortInitializer below
+  		if (!this.running.get()) {
+  			this.context.publishEvent(
+  					new InstancePreRegisteredEvent(this, getRegistration()));
+  			register();
+          }
+  //==============================================================================
+      protected void register() {
+  		this.serviceRegistry.register(getRegistration());
+  	}
+   //===========================NacosServiceRegistry================================
+      	public void register(Registration registration) {
+  
+  		if (StringUtils.isEmpty(registration.getServiceId())) {
+  			log.warn("No service to register for nacos client...");
+  			return;
+  		}
+  
+  		String serviceId = registration.getServiceId();
+  		String group = nacosDiscoveryProperties.getGroup();
+  
+  		Instance instance = getNacosInstanceFromRegistration(registration);
+  
+  		try {
+  			namingService.registerInstance(serviceId, group, instance);
+  			log.info("nacos registry, {} {} {}:{} register finished", group, serviceId,
+  					instance.getIp(), instance.getPort());
+  		}
+  		catch (Exception e) {
+  			log.error("nacos registry, {} register failed...{},", serviceId,
+  					registration.toString(), e);
+  		}
+  	}
+      //=======================NacosNamingService======================================
+         public void registerInstance(String serviceName, String groupName, Instance instance) throws NacosException {
+  
+          if (instance.isEphemeral()) {
+              BeatInfo beatInfo = new BeatInfo();
+              beatInfo.setServiceName(NamingUtils.getGroupedName(serviceName, groupName));
+              beatInfo.setIp(instance.getIp());
+              beatInfo.setPort(instance.getPort());
+              beatInfo.setCluster(instance.getClusterName());
+              beatInfo.setWeight(instance.getWeight());
+              beatInfo.setMetadata(instance.getMetadata());
+              beatInfo.setScheduled(false);
+              long instanceInterval = instance.getInstanceHeartBeatInterval();
+              beatInfo.setPeriod(instanceInterval == 0 ? DEFAULT_HEART_BEAT_INTERVAL : instanceInterval);
+  
+              beatReactor.addBeatInfo(NamingUtils.getGroupedName(serviceName, groupName), beatInfo);
+          }
+  
+          serverProxy.registerService(NamingUtils.getGroupedName(serviceName, groupName), groupName, instance);
+      }
+  ```
+
+  
+
+  
+
+  
+
+  
+
+  ####b,服务端instanceController处理客户端注册实例请求,更新自身服务实例表（springcloud默认ephemeral也就是CP架构）
+
+  1. nameservice 模块服务 controller 的InstanceController 对外提供服务实例注册功能
+
+  	 * Map<namespace, Map<group::serviceName, Service>>内存服务列表map
+
+  	```java 
+  	//================InstanceController=======================
+  	@PostMapping
+  	    public String register(HttpServletRequest request) throws Exception {
+  	
+  	        String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
+  	        String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID, Constants.DEFAULT_NAMESPACE_ID);
+  	        //注册实例的入口,此处parseInstance将请求转换为Instance对象
+  	        serviceManager.registerInstance(namespaceId, serviceName, parseInstance(request));
+  	        return "ok";
+  	    }
+  	//======================ServiceManager===================================
+  	 public void addInstance(String namespaceId, String serviceName, boolean ephemeral, Instance... ips) throws NacosException {
+  	        //构建namespaceId当作key
+  	        String key = KeyBuilder.buildInstanceListKey(namespaceId, serviceName, ephemeral);
+  	
+  	        Service service = getService(namespaceId, serviceName);
+  	        //用每个namespace-group下的service对象作为锁，保证数据一致性
+  	        synchronized (service) {
+  	            //获取本地注册或者修改过后的instances
+  	            List<Instance> instanceList = addIpAddresses(service, ephemeral, ips);
+  	
+  	            Instances instances = new Instances();
+  	            instances.setInstanceList(instanceList);
+  	            //开始重新替换service对象里面的instances
+  	            consistencyService.put(key, instances);
+  	        }
+  	    }
+  	
+  	```
+
+  	
+
+  2. 临时实例的话（Ephemeral模式）DistroConsistencyServiceImpl这个类去实现服务的注册功能
+
+  	它的onPut(key)更新Service对象，它的taskDispatcher.addTask()想其他注册中心同步实例消息.
+
+  	```java 
+  	//====================DistroConsistencyServiceImpl======================
+  	public void put(String key, Record value) throws NacosException {
+  	        onPut(key, value);
+  	        taskDispatcher.addTask(key);
+  	    }
+  	//==================================================================
+  	```
+
+  	**DistroConsistencyServiceImpl的准备：**
+
+  	@PostConstruct方法调用 定时线程池提交任务notifer
+
+  	```java 
+  	//=====================**DistroConsistencyServiceImpl===================
+  	 @PostConstruct
+  	    public void init() {
+  	        GlobalExecutor.submit(new Runnable() {
+  	            @Override
+  	            public void run() {
+  	                try {
+  	                    load();
+  	                } catch (Exception e) {
+  	                    Loggers.DISTRO.error("load data failed.", e);
+  	                }
+  	            }
+  	        });
+  	
+  	        executor.submit(notifier);
+  	    }
+  	//=====================================================================
+  	public void run() {
+  	    Loggers.DISTRO.info("distro notifier started");
+  	    //在@PostContrustor方法中将此任务提交给定时线程池执行
+  	    //不断循环处理服务列表发生改变的任务
+  	    while (true) {
+  	        try {
+  	            //获取所有的服务进行注册的任务按顺序处理
+  	            Pair pair = tasks.take();
+  	            if (pair == null) {
+  	                continue;
+  	            }
+  	
+  	            String datumKey = (String) pair.getValue0();
+  	            ApplyAction action = (ApplyAction) pair.getValue1();
+  	
+  	            services.remove(datumKey);
+  	
+  	            int count = 0;
+  	
+  	            if (!listeners.containsKey(datumKey)) {
+  	                continue;
+  	            }
+  	
+  	            for (RecordListener listener : listeners.get(datumKey)) {
+  	
+  	                count++;
+  	
+  	                try {
+  	                    //服务列表发生改变事件
+  	                    if (action == ApplyAction.CHANGE) {
+  	                        listener.onChange(datumKey, dataStore.get(datumKey).value);
+  	                        continue;
+  	                    }
+  	                    //服务列表发生删除事件
+  	                    if (action == ApplyAction.DELETE) {
+  	                        listener.onDelete(datumKey);
+  	                        continue;
+  	                    }
+  	                } catch (Throwable e) {
+  	                    Loggers.DISTRO.error("[NACOS-DISTRO] error while notifying listener of key: {}", datumKey, e);
+  	                }
+  	            }
+  	
+  	            if (Loggers.DISTRO.isDebugEnabled()) {
+  	                Loggers.DISTRO.debug("[NACOS-DISTRO] datum change notified, key: {}, listener count: {}, action: {}",
+  	                                     datumKey, count, action.name());
+  	            }
+  	        } catch (Throwable e) {
+  	            Loggers.DISTRO.error("[NACOS-DISTRO] Error while handling notifying task", e);
+  	        }
+  	    }
+  	}
+  	}
+  	//=======================Service===============================
+  	    public void onChange(String key, Instances value) throws Exception {
+  	
+  	        Loggers.SRV_LOG.info("[NACOS-RAFT] datum is changed, key: {}, value: {}", key, value);
+  	
+  	        for (Instance instance : value.getInstanceList()) {
+  	
+  	            if (instance == null) {
+  	                // Reject this abnormal instance list:
+  	                throw new RuntimeException("got null instance " + key);
+  	            }
+  	            //设置最大，最小服务权重的阈值
+  	            if (instance.getWeight() > 10000.0D) {
+  	                instance.setWeight(10000.0D);
+  	            }
+  	
+  	            if (instance.getWeight() < 0.01D && instance.getWeight() > 0.0D) {
+  	                instance.setWeight(0.01D);
+  	            }
+  	        }
+  	         //修改服务列表信息
+  	        updateIPs(value.getInstanceList(), KeyBuilder.matchEphemeralInstanceListKey(key));
+  	
+  	        recalculateChecksum();
+  	    }
+  	//===============================================================
+  	public void updateIPs(Collection<Instance> instances, boolean ephemeral) {
+  	        //初始化一个空的旧有的ClusterMap副本，但里面内容是空的
+  	        Map<String, List<Instance>> ipMap = new HashMap<>(clusterMap.size());
+  	        for (String clusterName : clusterMap.keySet()) {
+  	            ipMap.put(clusterName, new ArrayList<>());
+  	        }
+  	        //遍历发生改变，或者新添加的servieInstanceList
+  	        for (Instance instance : instances) {
+  	            try {
+  	                if (instance == null) {
+  	                    Loggers.SRV_LOG.error("[NACOS-DOM] received malformed ip: null");
+  	                    continue;
+  	                }
+  	
+  	                if (StringUtils.isEmpty(instance.getClusterName())) {
+  	                    instance.setClusterName(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
+  	                }
+  	                //添加新的cluster
+  	                if (!clusterMap.containsKey(instance.getClusterName())) {
+  	                    Loggers.SRV_LOG.warn("cluster: {} not found, ip: {}, will create new cluster with default configuration.",
+  	                        instance.getClusterName(), instance.toJSON());
+  	                    Cluster cluster = new Cluster(instance.getClusterName(), this);
+  	                    cluster.init();
+  	                    getClusterMap().put(instance.getClusterName(), cluster);
+  	                }
+  	                //从Cluster里面获取serviceInstanceList
+  	                List<Instance> clusterIPs = ipMap.get(instance.getClusterName());
+  	                //如果为null,初始化一个空的serviceInstanceList填充
+  	                if (clusterIPs == null) {
+  	                    clusterIPs = new LinkedList<>();
+  	                    ipMap.put(instance.getClusterName(), clusterIPs);
+  	                }
+  	                //初始化的空ClusterMap填充完毕
+  	                clusterIPs.add(instance);
+  	            } catch (Exception e) {
+  	                Loggers.SRV_LOG.error("[NACOS-DOM] failed to process ip: " + instance, e);
+  	            }
+  	        }
+  	        //遍历用户传进来的发生变化的ClusterMap副本
+  	        for (Map.Entry<String, List<Instance>> entry : ipMap.entrySet()) {
+  	            //make every ip mine
+  	            List<Instance> entryIPs = entry.getValue();
+  	            //调用发生变化的service的updateIps方法
+  	            clusterMap.get(entry.getKey()).updateIPs(entryIPs, ephemeral);
+  	        }
+  	
+  	        setLastModifiedMillis(System.currentTimeMillis());
+  	        getPushService().serviceChanged(this);
+  	        StringBuilder stringBuilder = new StringBuilder();
+  	
+  	        for (Instance instance : allIPs()) {
+  	            stringBuilder.append(instance.toIPAddr()).append("_").append(instance.isHealthy()).append(",");
+  	        }
+  	
+  	        Loggers.EVT_LOG.info("[IP-UPDATED] namespace: {}, service: {}, ips: {}",
+  	            getNamespaceId(), getName(), stringBuilder.toString());
+  	
+  	    }
+  	//=================================================================
+  	   public void updateIPs(List<Instance> ips, boolean ephemeral) {
+  	        //判断是临时服务实例还是永久服务实例,这里的ips是发生变化的serviceInstanceList
+  	        Set<Instance> toUpdateInstances = ephemeral ? ephemeralInstances : persistentInstances;
+  	        //构造一个空的Map
+  	        HashMap<String, Instance> oldIPMap = new HashMap<>(toUpdateInstances.size());
+  	        //将发生变动的serviceInstance放入空Map
+  	        for (Instance ip : toUpdateInstances) {
+  	            oldIPMap.put(ip.getDatumKey(), ip);
+  	        }
+  	        //传入变动的serviceInstanceList 调用updateIps方法，修改服务列表。传入
+  	        List<Instance> updatedIPs = updatedIPs(ips, oldIPMap.values());
+  	        if (updatedIPs.size() > 0) {
+  	            for (Instance ip : updatedIPs) {
+  	                Instance oldIP = oldIPMap.get(ip.getDatumKey());
+  	
+  	                // do not update the ip validation status of updated ips
+  	                // because the checker has the most precise result
+  	                // Only when ip is not marked, don't we update the health status of IP:
+  	                if (!ip.isMarked()) {
+  	                    ip.setHealthy(oldIP.isHealthy());
+  	                }
+  	
+  	                if (ip.isHealthy() != oldIP.isHealthy()) {
+  	                    // ip validation status updated
+  	                    Loggers.EVT_LOG.info("{} {SYNC} IP-{} {}:{}@{}",
+  	                        getService().getName(), (ip.isHealthy() ? "ENABLED" : "DISABLED"), ip.getIp(), ip.getPort(), getName());
+  	                }
+  	
+  	                if (ip.getWeight() != oldIP.getWeight()) {
+  	                    // ip validation status updated
+  	                    Loggers.EVT_LOG.info("{} {SYNC} {IP-UPDATED} {}->{}", getService().getName(), oldIP.toString(), ip.toString());
+  	                }
+  	            }
+  	        }
+  	
+  	        List<Instance> newIPs = subtract(ips, oldIPMap.values());
+  	        if (newIPs.size() > 0) {
+  	            Loggers.EVT_LOG.info("{} {SYNC} {IP-NEW} cluster: {}, new ips size: {}, content: {}",
+  	                getService().getName(), getName(), newIPs.size(), newIPs.toString());
+  	
+  	            for (Instance ip : newIPs) {
+  	                HealthCheckStatus.reset(ip);
+  	            }
+  	        }
+  	
+  	        List<Instance> deadIPs = subtract(oldIPMap.values(), ips);
+  	
+  	        if (deadIPs.size() > 0) {
+  	            Loggers.EVT_LOG.info("{} {SYNC} {IP-DEAD} cluster: {}, dead ips size: {}, content: {}",
+  	                getService().getName(), getName(), deadIPs.size(), deadIPs.toString());
+  	
+  	            for (Instance ip : deadIPs) {
+  	                HealthCheckStatus.remv(ip);
+  	            }
+  	        }
+  	
+  	        toUpdateInstances = new HashSet<>(ips);
+  	
+  	        //将发生改变的InstanceList替换掉
+  	        if (ephemeral) {
+  	            ephemeralInstances = toUpdateInstances;
+  	        } else {
+  	            persistentInstances = toUpdateInstances;
+  	        }
+  	    }
+  	```
+
+   
+
+  3.nacos完成自身服务列表变动之后，向其他naocs异步同步变动,一个nacos对应一个TaskSchedule，如果同步失败的话会进行重试。
+
+  ```java 
+  //DisSerivceImpl 
+  public void put(String key, Record value) throws NacosException {
+          onPut(key, value);
+          //向其他naocos同步变动相关信息，是异步的，保证效率
+          taskDispatcher.addTask(key);
+      }
+  //===========================NamingProxy=====================================
+      public static boolean syncData(byte[] data, String curServer) {
+          Map<String, String> headers = new HashMap<>(128);
+          
+          headers.put(HttpHeaderConsts.CLIENT_VERSION_HEADER, VersionUtils.VERSION);
+          headers.put(HttpHeaderConsts.USER_AGENT_HEADER, UtilsAndCommons.SERVER_VERSION);
+          headers.put("Accept-Encoding", "gzip,deflate,sdch");
+          headers.put("Connection", "Keep-Alive");
+          headers.put("Content-Encoding", "gzip");
+  
+          try {
+              HttpClient.HttpResult result = HttpClient.httpPutLarge("http://" + curServer + RunningConfig.getContextPath()
+                  + UtilsAndCommons.NACOS_NAMING_CONTEXT + DATA_ON_SYNC_URL, headers, data);
+              if (HttpURLConnection.HTTP_OK == result.code) {
+                  return true;
+              }
+              if (HttpURLConnection.HTTP_NOT_MODIFIED == result.code) {
+                  return true;
+              }
+              throw new IOException("failed to req API:" + "http://" + curServer
+                  + RunningConfig.getContextPath()
+                  + UtilsAndCommons.NACOS_NAMING_CONTEXT + DATA_ON_SYNC_URL + ". code:"
+                  + result.code + " msg: " + result.content);
+          } catch (Exception e) {
+              Loggers.SRV_LOG.warn("NamingProxy", e);
+          
+          }
+          return false;
+      }
+  
+  ```
+
+
+
+
+
+
+#### c,服务端处理客户端心跳请求。
+
+```java 
+@PutMapping("/beat")
+    public JSONObject beat(HttpServletRequest request) throws Exception {
+
+        JSONObject result = new JSONObject();
+
+        result.put("clientBeatInterval", switchDomain.getClientBeatInterval());
+        String serviceName = WebUtils.required(request, CommonParams.SERVICE_NAME);
+        String namespaceId = WebUtils.optional(request, CommonParams.NAMESPACE_ID,
+            Constants.DEFAULT_NAMESPACE_ID);
+        String beat = WebUtils.required(request, "beat");
+        RsInfo clientBeat = JSON.parseObject(beat, RsInfo.class);
+
+        if (!switchDomain.isDefaultInstanceEphemeral() && !clientBeat.isEphemeral()) {
+            return result;
+        }
+
+        if (StringUtils.isBlank(clientBeat.getCluster())) {
+            clientBeat.setCluster(UtilsAndCommons.DEFAULT_CLUSTER_NAME);
+        }
+
+        String clusterName = clientBeat.getCluster();
+
+        if (Loggers.SRV_LOG.isDebugEnabled()) {
+            Loggers.SRV_LOG.debug("[CLIENT-BEAT] full arguments: beat: {}, serviceName: {}", clientBeat, serviceName);
+        }
+
+        Instance instance = serviceManager.getInstance(namespaceId, serviceName, clientBeat.getCluster(),
+            clientBeat.getIp(),
+            clientBeat.getPort());
+        //如果在处理心跳的过程中，之前没有或者断掉的话，那么服务端会重新注册服务实例
+        if (instance == null) {
+            instance = new Instance();
+            instance.setPort(clientBeat.getPort());
+            instance.setIp(clientBeat.getIp());
+            instance.setWeight(clientBeat.getWeight());
+            instance.setMetadata(clientBeat.getMetadata());
+            instance.setClusterName(clusterName);
+            instance.setServiceName(serviceName);
+            instance.setInstanceId(instance.getInstanceId());
+            instance.setEphemeral(clientBeat.isEphemeral());
+
+            serviceManager.registerInstance(namespaceId, serviceName, instance);
+        }
+
+        Service service = serviceManager.getService(namespaceId, serviceName);
+
+        if (service == null) {
+            throw new NacosException(NacosException.SERVER_ERROR,
+                "service not found: " + serviceName + "@" + namespaceId);
+        }
+        //如果之前有服务实例的话，那么则更新服务实例列表相关信息，以便维护服务实列的可用性
+        service.processClientBeat(clientBeat);
+        result.put("clientBeatInterval", instance.getInstanceHeartBeatInterval());
+        return result;
+    }
+```
+
+
+
+#### d, 服务端对客户端的健康检查
+
+```java 
+//========================ServiceManager=============================================
+private void putServiceAndInit(Service service) throws NacosException {
+        putService(service);
+        //此方法启动一个维护服务健康状态的定时任务。服务实例注册成功后，如果实例长时间没有发送心跳的话，那么服务端会把该服务下线。
+        service.init();
+        consistencyService.listen(KeyBuilder.buildInstanceListKey(service.getNamespaceId(), service.getName(), true), service);
+        consistencyService.listen(KeyBuilder.buildInstanceListKey(service.getNamespaceId(), service.getName(), false), service);
+        Loggers.SRV_LOG.info("[NEW-SERVICE] {}", service.toJSON());
+    }
+//========================Service===================================================
+public void init() {
+        //clientBeatCheckTask就是服务端健康检查的定时任务
+        HealthCheckReactor.scheduleCheck(clientBeatCheckTask);
+
+        for (Map.Entry<String, Cluster> entry : clusterMap.entrySet()) {
+            entry.getValue().setService(this);
+            entry.getValue().init();
+        }
+    }
+
+//============================ClientBeatCheckTask====================================
+ @Override
+    public void run() {
+        try {
+            if (!getDistroMapper().responsible(service.getName())) {
+                return;
+            }
+
+            List<Instance> instances = service.allIPs(true);
+
+            // first set health status of instances:
+            for (Instance instance : instances) {
+                //如果心跳超过服务端指定时间达到不健康条件15s，则服务端将服务实例设置不健康状态。不健康状态实例不可访问。
+                if (System.currentTimeMillis() - instance.getLastBeat() > instance.getInstanceHeartBeatTimeOut()) {
+                    if (!instance.isMarked()) {
+                        if (instance.isHealthy()) {
+                            instance.setHealthy(false);
+                            Loggers.EVT_LOG.info("{POS} {IP-DISABLED} valid: {}:{}@{}@{}, region: {}, msg: client timeout after {}, last beat: {}",
+                                instance.getIp(), instance.getPort(), instance.getClusterName(), service.getName(),
+                                UtilsAndCommons.LOCALHOST_SITE, instance.getInstanceHeartBeatTimeOut(), instance.getLastBeat());
+                            getPushService().serviceChanged(service);
+                            SpringContext.getAppContext().publishEvent(new InstanceHeartbeatTimeoutEvent(this, instance));
+                        }
+                    }
+                }
+            }
+
+            if (!getGlobalConfig().isExpireInstance()) {
+                return;
+            }
+
+            // then remove obsolete instances:
+            for (Instance instance : instances) {
+
+                if (instance.isMarked()) {
+                    continue;
+                }
+                //如果心跳超过指定时间达到删除条件30s，那么删除实例
+                if (System.currentTimeMillis() - instance.getLastBeat() > instance.getIpDeleteTimeout()) {
+                    // delete instance
+                    Loggers.SRV_LOG.info("[AUTO-DELETE-IP] service: {}, ip: {}", service.getName(), JSON.toJSONString(instance));
+                    deleteIP(instance);
+                }
+            }
+
+        } catch (Exception e) {
+            Loggers.SRV_LOG.warn("Exception while processing client beat time out.", e);
+        }
+
+    }
+```
+
+
+
+
+
+#### d.服务端AP模式服务实例持久化模式
+
+
+
+
+
+
+
+
+
+## 2.微服务调用负载均衡组件
+
+####应用实例:Ribbon
+
+1. 引入springcloud ribbon starter
+2. 使用@LoadBanlanceClient注解 修饰RestTemplate
+3. 负载均衡策略 
+  1. 随机 random
+  2. 轮询
+  3.  对选定的负载均衡策略机上重试机制，在一个配置时间段内当选择Server不成功， 则一直尝试使用subRule的方式选择一个可用的server.  
+  4.  ZoneAvoidanceRule（默认是这个）  复合判断Server所在Zone的性能和Server的可用性选择Server，在没有Zone的情况下类是 轮询。  
+  5.  WeightedResponseTimeRule   根据响应时间加权，响应时间越长，权重越小，被选中的可能性越低； 
+  6.  BestAvailableRule   选择一个最小的并发请求的Server，逐个考察Server，如果Server被tripped了，则跳过 
+  7. 自定义负载均衡策略 extends AbstractLoadBalancerRule 
+
+
+
+#### Ribbon源码
+
+####1.ribbon依赖引入
+
+starter-nacos-discovery引入spring-cloud-alibaba-nacos-discovery包而它又引入spring-cloud-starter-netflix-ribbon。从而将ribbon相关依赖jar包引入
+
+```xml 
+<dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+            <version>2.2.0.RELEASE</version>
+        </dependency>
+
+  <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-ribbon</artifactId>
+        </dependency>
+```
+
+#### 2.spring-nacos 集成ribbon
+
+spring-cloud-alibaba-nacos-discovery 包META-INF里面Spring.factories包含Ribbon相关核心Bean。然后利用springboot 的AutoConfiguration将核心Bean注入spring容器，并且实例化。@AutoConfigurationAfter让Ribbon自身先完成核心Bean的注入之后，再将ribbon和nacos集成的相关Bean注入容器当中
+
+```
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=com.alibaba.cloud.nacos.ribbon.RibbonNacosAutoConfiguration
+
+@Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties
+@ConditionalOnBean(SpringClientFactory.class)
+@ConditionalOnRibbonNacos
+@ConditionalOnNacosDiscoveryEnabled
+@AutoConfigureAfter(RibbonAutoConfiguration.class)
+@RibbonClients(defaultConfiguration = NacosRibbonClientConfiguration.class)
+public class RibbonNacosAutoConfiguration {
+
+}
+```
+
+
+
+
+
+#### 3.Ribbon的自动装配RibbonAutoConfiguration.class
+
+1. netflix-riibbon利用spring.factories装在RibbonAutoConfiguration.class
+
+2.  RibbonAutoConfiguration会装载一系列核心Bean其中包括SpringCLientFactory，LoadBanlancerClient等等
+
+3. RibbonLoadBalancerClient会实例化。它是LoadBalancerClient接口的实现类它会被注入到后面的LoadInteceptor里面去。后续restTemplate做负载均衡请求时会用到
+
+4. ribbon会实例化LoadAutoConfiguration.其中采集了被Qualifier修饰的RestTemplate对象。
+
+5. ribbon为每一个采集的RestTemplate对象用RestTemplateCustomizer进行了定制化
+
+6. ribbon自定义了一个Customizer，它的功能是向Restemplate的Inteceptors里添加一个Interceptor.此Inteceptor的逻辑是增加LoadIntecetpr.这样在RestTempate发送请求时，就会调用里面Inteceptor的逻辑，实现各种定制策略的负载均衡了。
+
+7. RetryLoadBalancerInterceptor里面的拦截逻辑里面调用SpringClientFactory的getInsance方法获取服务列表
+
+8. SpringClientFactory的getInstance方法，新建AnnotationContext 并且讲RibbonClientConfiguration作为它的配置类，之后刷新加载Bean.
+
+9. RibbonClientConfiguration定义了IloadBanlancer,ServerList Iping等一些列核心对象。其中ServerList对象在Nacos和Ribbon的集成中定义了实现。因此ribbon此处寻找服务列表，调用的是nacos的ServerList.
+
+	**ribbon在获取一份自己的服务列表之后，还会启动一个定时任务，定时同步nacos的服务列表，和自己的服务列表的一致性。**
+
+	
+
+	```java 
+	//===============RibbonAutoCOnfiguration===========================
+	@Bean
+		@ConditionalOnMissingBean(LoadBalancerClient.class)
+		public LoadBalancerClient loadBalancerClient() {
+			return new RibbonLoadBalancerClient(springClientFactory());
+		}
+	
+	//====================LoadAutoConfiguration==========================
+	@LoadBalanced
+	@Autowired(required = false)
+	private List<RestTemplate> restTemplates = Collections.emptyList();
+	@Configuration(proxyBeanMethods = false)
+	
+	
+	@Bean
+	@ConditionalOnMissingBean
+	public LoadBalancerRequestFactory loadBalancerRequestFactory(
+	    LoadBalancerClient loadBalancerClient) {
+	    return new LoadBalancerRequestFactory(loadBalancerClient, this.transformers);
+	}
+	
+	@Configuration(proxyBeanMethods = false)
+	@ConditionalOnMissingClass("org.springframework.retry.support.RetryTemplate")
+	static class LoadBalancerInterceptorConfig {
+	
+	    @Bean
+	    public LoadBalancerInterceptor ribbonInterceptor(
+	        LoadBalancerClient loadBalancerClient,
+	        LoadBalancerRequestFactory requestFactory) {
+	        return new LoadBalancerInterceptor(loadBalancerClient, requestFactory);
+	    }
+	
+	    @Bean
+	    @ConditionalOnMissingBean
+	    public RestTemplateCustomizer restTemplateCustomizer(
+	        final LoadBalancerInterceptor loadBalancerInterceptor) {
+	        return restTemplate -> {
+	            List<ClientHttpRequestInterceptor> list = new ArrayList<>(
+	                restTemplate.getInterceptors());
+	            list.add(loadBalancerInterceptor);
+	            restTemplate.setInterceptors(list);
+	        };
+	    }
+	
+	}
+	//===================RibbonClientConfiguration=================================
+		@Bean
+		@ConditionalOnMissingBean
+		@SuppressWarnings("unchecked")
+		public ServerList<Server> ribbonServerList(IClientConfig config) {
+			if (this.propertiesFactory.isSet(ServerList.class, name)) {
+				return this.propertiesFactory.get(ServerList.class, config, name);
+			}
+			ConfigurationBasedServerList serverList = new ConfigurationBasedServerList();
+			serverList.initWithNiwsConfig(config);
+			return serverList;
+		}
+	
+		@Bean
+		@ConditionalOnMissingBean
+		public ServerListUpdater ribbonServerListUpdater(IClientConfig config) {
+			return new PollingServerListUpdater(config);
+		}
+	
+		@Bean
+		@ConditionalOnMissingBean
+		public ILoadBalancer ribbonLoadBalancer(IClientConfig config,
+				ServerList<Server> serverList, ServerListFilter<Server> serverListFilter,
+				IRule rule, IPing ping, ServerListUpdater serverListUpdater) {
+			if (this.propertiesFactory.isSet(ILoadBalancer.class, name)) {
+				return this.propertiesFactory.get(ILoadBalancer.class, config, name);
+			}
+			return new ZoneAwareLoadBalancer<>(config, rule, ping, serverList,
+					serverListFilter, serverListUpdater);
+		}
+	
+	```
+
+	
+
+#### 4.nacos NacosRibbonClientConfiguration 集成Ribbon
+
+1. nacos会创建自身的ServerList .并且config是Ribbon已经创建好的DefaultClientConfigImpl
+
+2. Nacos ServerList里面会通过调用nacos服务端对外的API instance/List 来获取所有的healthy 服务实例信息到本地内存
+
+3. Nacos ServierList还会设定一个定时任务UpdateTask，定时去从nacos服务端获取实例，更新到本地。
+
+	```java 
+	//=========================NacosRibbonClientConfiguration =======================
+	@Autowired
+		private PropertiesFactory propertiesFactory;
+	
+		@Bean
+		@ConditionalOnMissingBean
+		public ServerList<?> ribbonServerList(IClientConfig config,
+				NacosDiscoveryProperties nacosDiscoveryProperties) {
+			if (this.propertiesFactory.isSet(ServerList.class, config.getClientName())) {
+				ServerList serverList = this.propertiesFactory.get(ServerList.class, config,
+						config.getClientName());
+				return serverList;
+			}
+			NacosServerList serverList = new NacosServerList(nacosDiscoveryProperties);
+			serverList.initWithNiwsConfig(config);
+			return serverList;
+		}
+	//============================ServerList=======================================
+	private List<NacosServer> getServers() {
+			try {
+				String group = discoveryProperties.getGroup();
+				List<Instance> instances = discoveryProperties.namingServiceInstance()
+						.selectInstances(serviceId, group, true);
+				return instancesToServerList(instances);
+			}
+			catch (Exception e) {
+				throw new IllegalStateException(
+						"Can not get service instances from nacos, serviceId=" + serviceId,
+						e);
+			}
+		}
+	//=============================NacosNamingService============================
+	 @Override
+	    public List<Instance> selectInstances(String serviceName, String groupName, List<String> clusters, boolean healthy, boolean subscribe) throws NacosException {
+	
+	        ServiceInfo serviceInfo;
+	        if (subscribe) {
+	            serviceInfo = hostReactor.getServiceInfo(NamingUtils.getGroupedName(serviceName, groupName), StringUtils.join(clusters, ","));
+	        } else {
+	            serviceInfo = hostReactor.getServiceInfoDirectlyFromServer(NamingUtils.getGroupedName(serviceName, groupName), StringUtils.join(clusters, ","));
+	        }
+	        return selectInstances(serviceInfo, healthy);
+	    }
+	//====================HOstReactor=================================
+	    public ServiceInfo getServiceInfo(final String serviceName, final String clusters) {
+	
+	        NAMING_LOGGER.debug("failover-mode: " + failoverReactor.isFailoverSwitch());
+	        String key = ServiceInfo.getKey(serviceName, clusters);
+	        if (failoverReactor.isFailoverSwitch()) {
+	            return failoverReactor.getService(key);
+	        }
+	
+	        ServiceInfo serviceObj = getServiceInfo0(serviceName, clusters);
+	
+	        if (null == serviceObj) {
+	            serviceObj = new ServiceInfo(serviceName, clusters);
+	
+	            serviceInfoMap.put(serviceObj.getKey(), serviceObj);
+	
+	            updatingMap.put(serviceName, new Object());
+	            updateServiceNow(serviceName, clusters);
+	            updatingMap.remove(serviceName);
+	
+	        } else if (updatingMap.containsKey(serviceName)) {
+	
+	            if (UPDATE_HOLD_INTERVAL > 0) {
+	                // hold a moment waiting for update finish
+	                synchronized (serviceObj) {
+	                    try {
+	                        serviceObj.wait(UPDATE_HOLD_INTERVAL);
+	                    } catch (InterruptedException e) {
+	                        NAMING_LOGGER.error("[getServiceInfo] serviceName:" + serviceName + ", clusters:" + clusters, e);
+	                    }
+	                }
+	            }
+	        }
+	
+	        scheduleUpdateIfAbsent(serviceName, clusters);
+	
+	        return serviceInfoMap.get(serviceObj.getKey());
+	    }
+	
+	//=========================================================================
+	    public void scheduleUpdateIfAbsent(String serviceName, String clusters) {
+	        if (futureMap.get(ServiceInfo.getKey(serviceName, clusters)) != null) {
+	            return;
+	        }
+	
+	        synchronized (futureMap) {
+	            if (futureMap.get(ServiceInfo.getKey(serviceName, clusters)) != null) {
+	                return;
+	            }
+	
+	            ScheduledFuture<?> future = addTask(new UpdateTask(serviceName, clusters));
+	            futureMap.put(ServiceInfo.getKey(serviceName, clusters), future);
+	        }
+	    }
+	
+	//====================UpdateTask===================================
+	 public void run() {
+	            try {
+	                ServiceInfo serviceObj = serviceInfoMap.get(ServiceInfo.getKey(serviceName, clusters));
+	
+	                if (serviceObj == null) {
+	                    updateServiceNow(serviceName, clusters);
+	                    executor.schedule(this, DEFAULT_DELAY, TimeUnit.MILLISECONDS);
+	                    return;
+	                }
+	
+	                if (serviceObj.getLastRefTime() <= lastRefTime) {
+	                    updateServiceNow(serviceName, clusters);
+	                    serviceObj = serviceInfoMap.get(ServiceInfo.getKey(serviceName, clusters));
+	                } else {
+	                    // if serviceName already updated by push, we should not override it
+	                    // since the push data may be different from pull through force push
+	                    refreshOnly(serviceName, clusters);
+	                }
+	
+	                executor.schedule(this, serviceObj.getCacheMillis(), TimeUnit.MILLISECONDS);
+	
+	                lastRefTime = serviceObj.getLastRefTime();
+	            } catch (Throwable e) {
+	                NAMING_LOGGER.warn("[NA] failed to update serviceName: " + serviceName, e);
+	            }
+	
+	        }
+	    }
+	```
+
+	
+
+
+
+
+
+
+
+
+
+
+
+## 3.远程调用封装http组件
+
+#### 应用实例:Open-Feign
+
+1. 使用
+
+  1. 引入pom
+  2. 创建项目 里面存放feign-Interfaces 使用@FeignClient修饰
+  3. 服务方对接口进行具体实现。调用方使用接口进行远程调用.并且调用方需要@EnableFeignClients注解
+  4. 可调整feign 日志级别 full <header<basic<none
+
+   
+
+#### 源码分析
+
+#### 1.引入spring-cloud-starter-openfeign 依赖包。@EnableFeignClient @Import FeignClientsRegistrar
+
+FeignClientsRegistrar会扫描工程所有包下被@ForeignClient修饰的类。并且解析设置。
+
+
+
+#### 2.FeignClientsRegistrar 注册的@ForeignClient Bean都是FactoryBean类型
+
+因为@ForieignClient注册进容器的都是Spring的FactoryBean：FeignClientFactoryBean，因此实际会通过FeignClientFactoryBean的getObject对象产生对象。
+
+
+
+####3.FeignClientFactoryBean getObject创建实际对象
+
+getObject里首先会调用ForeignCOntext对象的getInstance方法。而ForeignContext集成NamedContextFactory.这也是Ribbon loadbancaner继承的类。他会获取一个Ribbon的LoadBanlancerClient对象。
+
+Ribbon的LoadBanlancerClient对象经过FeignRibbonClientAutoConfiguration自动装配已经准备好了。
+
+```java 
+//==========FeignClientsRegistrar ============================================
+public void registerFeignClients(AnnotationMetadata metadata,
+                                 BeanDefinitionRegistry registry) {
+    ClassPathScanningCandidateComponentProvider scanner = getScanner();
+    scanner.setResourceLoader(this.resourceLoader);
+
+    Set<String> basePackages;
+
+    Map<String, Object> attrs = metadata
+        .getAnnotationAttributes(EnableFeignClients.class.getName());
+    AnnotationTypeFilter annotationTypeFilter = new AnnotationTypeFilter(
+        FeignClient.class);
+    final Class<?>[] clients = attrs == null ? null
+        : (Class<?>[]) attrs.get("clients");
+    if (clients == null || clients.length == 0) {
+        scanner.addIncludeFilter(annotationTypeFilter);
+        basePackages = getBasePackages(metadata);
+    }
+    else {
+        final Set<String> clientClasses = new HashSet<>();
+        basePackages = new HashSet<>();
+        for (Class<?> clazz : clients) {
+            basePackages.add(ClassUtils.getPackageName(clazz));
+            clientClasses.add(clazz.getCanonicalName());
+        }
+        AbstractClassTestingTypeFilter filter = new AbstractClassTestingTypeFilter() {
+            @Override
+            protected boolean match(ClassMetadata metadata) {
+                String cleaned = metadata.getClassName().replaceAll("\\$", ".");
+                return clientClasses.contains(cleaned);
+            }
+        };
+        scanner.addIncludeFilter(
+            new AllTypeFilter(Arrays.asList(filter, annotationTypeFilter)));
+    }
+
+    for (String basePackage : basePackages) {
+        Set<BeanDefinition> candidateComponents = scanner
+            .findCandidateComponents(basePackage);
+        for (BeanDefinition candidateComponent : candidateComponents) {
+            if (candidateComponent instanceof AnnotatedBeanDefinition) {
+                // verify annotated class is an interface
+                AnnotatedBeanDefinition beanDefinition = (AnnotatedBeanDefinition) candidateComponent;
+                AnnotationMetadata annotationMetadata = beanDefinition.getMetadata();
+                Assert.isTrue(annotationMetadata.isInterface(),
+                              "@FeignClient can only be specified on an interface");
+
+                Map<String, Object> attributes = annotationMetadata
+                    .getAnnotationAttributes(
+                    FeignClient.class.getCanonicalName());
+
+                String name = getClientName(attributes);
+                registerClientConfiguration(registry, name,
+                                            attributes.get("configuration"));
+
+                registerFeignClient(registry, annotationMetadata, attributes);
+            }
+        }
+    }
+}
+//===============================================================================
+private void registerFeignClient(BeanDefinitionRegistry registry,
+                                 AnnotationMetadata annotationMetadata, Map<String, Object> attributes) {
+    String className = annotationMetadata.getClassName();
+    BeanDefinitionBuilder definition = BeanDefinitionBuilder
+        .genericBeanDefinition(FeignClientFactoryBean.class);
+    validate(attributes);
+    definition.addPropertyValue("url", getUrl(attributes));
+    definition.addPropertyValue("path", getPath(attributes));
+    String name = getName(attributes);
+    definition.addPropertyValue("name", name);
+    String contextId = getContextId(attributes);
+    definition.addPropertyValue("contextId", contextId);
+    definition.addPropertyValue("type", className);
+    definition.addPropertyValue("decode404", attributes.get("decode404"));
+    definition.addPropertyValue("fallback", attributes.get("fallback"));
+    definition.addPropertyValue("fallbackFactory", attributes.get("fallbackFactory"));
+    definition.setAutowireMode(AbstractBeanDefinition.AUTOWIRE_BY_TYPE);
+
+    String alias = contextId + "FeignClient";
+    AbstractBeanDefinition beanDefinition = definition.getBeanDefinition();
+    beanDefinition.setAttribute(FactoryBean.OBJECT_TYPE_ATTRIBUTE, className);
+
+    // has a default, won't be null
+    boolean primary = (Boolean) attributes.get("primary");
+
+    beanDefinition.setPrimary(primary);
+
+    String qualifier = getQualifier(attributes);
+    if (StringUtils.hasText(qualifier)) {
+        alias = qualifier;
+    }
+
+    BeanDefinitionHolder holder = new BeanDefinitionHolder(beanDefinition, className,
+                                                           new String[] { alias });
+    BeanDefinitionReaderUtils.registerBeanDefinition(holder, registry);
+}
+//==========================ForeignClientFactoryBean=========================
+@Override
+public Object getObject() throws Exception {
+    return getTarget();
+}
+//=========================================
+<T> T getTarget() {
+    FeignContext context = applicationContext.getBean(FeignContext.class);
+    Feign.Builder builder = feign(context);
+
+    if (!StringUtils.hasText(url)) {
+        if (!name.startsWith("http")) {
+            url = "http://" + name;
+        }
+        else {
+            url = name;
+        }
+        url += cleanPath();
+        return (T) loadBalance(builder, context,
+                               new HardCodedTarget<>(type, name, url));
+    }
+    if (StringUtils.hasText(url) && !url.startsWith("http")) {
+        url = "http://" + url;
+    }
+    String url = this.url + cleanPath();
+    Client client = getOptional(context, Client.class);
+    if (client != null) {
+        if (client instanceof LoadBalancerFeignClient) {
+            // not load balancing because we have a url,
+            // but ribbon is on the classpath, so unwrap
+            client = ((LoadBalancerFeignClient) client).getDelegate();
+        }
+        if (client instanceof FeignBlockingLoadBalancerClient) {
+            // not load balancing because we have a url,
+            // but Spring Cloud LoadBalancer is on the classpath, so unwrap
+            client = ((FeignBlockingLoadBalancerClient) client).getDelegate();
+        }
+        builder.client(client);
+    }
+    Targeter targeter = get(context, Targeter.class);
+    return (T) targeter.target(this, builder, context,
+                               new HardCodedTarget<>(type, name, url));
+}
+//=================================================================
+protected <T> T loadBalance(Feign.Builder builder, FeignContext context,
+                            HardCodedTarget<T> target) {
+    Client client = getOptional(context, Client.class);
+    if (client != null) {
+        builder.client(client);
+        Targeter targeter = get(context, Targeter.class);
+        return targeter.target(this, builder, context, target);
+    }
+
+    throw new IllegalStateException(
+        "No Feign Client for loadBalancing defined. Did you forget to include spring-cloud-starter-netflix-ribbon?");
+}
+
+```
+
+
+
+#### 4.Foreign获取到了Ribbon的client对象之后，会进行JDK的动态代理。
+
+生成代理对象。并且调用过程成集成了对SpringMVC注解的支持使用。可以识别SpringMvc注解进行http调用。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 4.微服务熔断流控组件
+
+####1.服务宕机产生的雪崩效应
+
+高并发的业务场景，某个服务A宕机，调用者B调用的线程被阻塞，释放不了相关资源。导致B去不断申请新的资源。计算机的资源是有限的。因此在超过最大限额之后，影响到别的服务的使用。进而传播到其他服务。产生所有服务的雪崩效应。也叫级联故障。
+
+
+
+解决微服务之间的雪崩效应：
+
+1. 超时机制
+
+	调用者设置调用的超时时间。一旦超过。进行异常处理。释放相关资源。
+
+2. 舱壁隔离模式。
+
+	把调用者的调用资源分组。每一组分隔开。互不影响。即使A组的资源阻塞了。但是不影响B组资源的使用。
+
+	hystrix的线程池隔离模式
+
+3. 断路器模式。
+
+	hystrix 一旦失败达到一定次数(阈值)，那么就是直接失败返回，不再请求。跳闸一段时间之后，再次去请求，如果成功，关闭断路器。恢复正常请求。如果还是失败。继续维持断路器的打开状态。依然不去请求。
+
+	
+
+#### 应用实例：Sentinel
+
+####Sentinel与springcloud整合
+
+1. pom导入springcloud-sentinel-starter包
+2. 限流的方法添加@SentinelResource()方法
+3. 启动Sentinel dashboard服务  应用暴露端口给Sentinel，配置文件设置sentinel dashboard端口
+
+
+
+#### Sentinel ribbon整合
+
+1. RestTempate @Bean类上添加@SentinelRestTemplate注解
+
+2. application.properties 开启resttemplate.sentinel.enabled=true
+
+
+
+#### Sentinel OpenFeign整合
+
+1. @ForeignClient注解 fallbackFactory类增加
+
+2. application.properties 开启feign.sentinel.enabled=true
+
+
+
+#### Sentinel源码分析
+
+springcloud-sentinel-starter
+
+##### 1.@SentinelResource的入口
+
+1.springcloud-sentinel-starter  spring.factories文件加载SentinelAutoConfiguration自动配置类,并且里面包含AOP的配置
+
+```java 
+	@Bean
+	@ConditionalOnMissingBean
+	public SentinelResourceAspect sentinelResourceAspect() {
+		return new SentinelResourceAspect();
+	}
+```
+
+
+
+
+
+2.Spring AOP SentinelResourceAspect类 带有AOP切面 切入点是@SentinelResource注解 ,切入点方法带有Sentinel核心逻辑entry = SphU.entry(resourceName, resourceType, entryType, pjp.getArgs());
+
+```java 
+@Aspect
+public class SentinelResourceAspect extends AbstractSentinelAspectSupport {
+    public SentinelResourceAspect() {
+    }
+
+    @Pointcut("@annotation(com.alibaba.csp.sentinel.annotation.SentinelResource)")
+    public void sentinelResourceAnnotationPointcut() {
+    }
+    @Around("sentinelResourceAnnotationPointcut()")
+    public Object invokeResourceWithSentinel(ProceedingJoinPoint pjp) throws Throwable {
+        Method originMethod = this.resolveMethod(pjp);
+        SentinelResource annotation = (SentinelResource)originMethod.getAnnotation(SentinelResource.class);
+        if (annotation == null) {
+            throw new IllegalStateException("Wrong state for SentinelResource annotation");
+        } else {
+            String resourceName = this.getResourceName(annotation.value(), originMethod);
+            EntryType entryType = annotation.entryType();
+            int resourceType = annotation.resourceType();
+            Entry entry = null;
+
+            Object var10;
+            try {
+                Object var18;
+                try {
+                    entry = SphU.entry(resourceName, resourceType, entryType, pjp.getArgs());
+                    Object result = pjp.proceed();
+                    var18 = result;
+                    return var18;
+                } catch (BlockException var15) {
+                    var18 = this.handleBlockException(pjp, annotation, var15);
+                    return var18;
+                } catch (Throwable var16) {
+                    Class<? extends Throwable>[] exceptionsToIgnore = annotation.exceptionsToIgnore();
+                    if (exceptionsToIgnore.length > 0 && this.exceptionBelongsTo(var16, exceptionsToIgnore)) {
+                        throw var16;
+                    }
+                }
+
+                if (!this.exceptionBelongsTo(var16, annotation.exceptionsToTrace())) {
+                    throw var16;
+                }
+
+                this.traceException(var16);
+                var10 = this.handleFallback(pjp, annotation, var16);
+            } finally {
+                if (entry != null) {
+                    entry.exit(1, pjp.getArgs());
+                }
+
+            }
+
+            return var10;
+        }
+    }
+```
+
+
+
+#####2.Sphu.entry 初始化链条节点，并且链式调用各个节点逻辑
+
+1.SphU.entry方法 构建ProcessChainSlot放入一个HashMap中，其中键是SentinelResource的名称，值是构建之后的ProcessChainSlot.利用建造者模式加 java的SPI机制加载不同的Slot到ProcessChain当中，并且按顺序做成一条单向链表。每次都会调用每个slot的entry方法，然后之后又会调用next节点的entry方法。典型的责任链调用模式。会进行排序，且第一个Slot是NodeSelectorSlot 并且它会初始化一个DefaultNode 节点
+
+其中entry方法会调用下一个节点的逻辑 exit方法 也是
+
+```properties 
+com.alibaba.csp.sentinel.slots.nodeselector.NodeSelectorSlot
+com.alibaba.csp.sentinel.slots.clusterbuilder.ClusterBuilderSlot
+com.alibaba.csp.sentinel.slots.logger.LogSlot
+com.alibaba.csp.sentinel.slots.statistic.StatisticSlot
+com.alibaba.csp.sentinel.slots.block.authority.AuthoritySlot
+com.alibaba.csp.sentinel.slots.system.SystemSlot
+com.alibaba.csp.sentinel.slots.block.flow.FlowSlot
+com.alibaba.csp.sentinel.slots.block.degrade.DegradeSlot
+```
+
+最终到CtSph类
+
+```java 
+ //创建责任链条
+        ProcessorSlot<Object> chain = lookProcessChain(resourceWrapper);
+
+        // Means processor cache size exceeds {@link Constants.MAX_SLOT_CHAIN_SIZE}, so no rule checking will be done.
+        if (chain == null) {
+            return asyncEntryWithNoChain(resourceWrapper, context);
+        }
+
+        AsyncEntry asyncEntry = new AsyncEntry(resourceWrapper, chain, context);
+        try {
+            //开始调用 chain是DefaultProcessSlotChain
+            chain.entry(context, resourceWrapper, null, count, prioritized, args);
+            // Initiate the async context only when the entry successfully passed the slot chain.
+            asyncEntry.initAsyncContext();
+            // The asynchronous call may take time in background, and current context should not be hanged on it.
+            // So we need to remove current async entry from current context.
+            asyncEntry.cleanCurrentEntryInLocal();
+        } catch (BlockException e1) {
+            // When blocked, the async entry will be exited on current context.
+            // The async context will not be initialized.
+            asyncEntry.exitForContext(context, count, args);
+            throw e1;
+        } catch (Throwable e1) {
+            // This should not happen, unless there are errors existing in Sentinel internal.
+            // When this happens, async context is not initialized.
+            RecordLog.warn("Sentinel unexpected exception in asyncEntryInternal", e1);
+
+            asyncEntry.cleanCurrentEntryInLocal();
+        }
+        return asyncEntry;
+    }
+```
+
+进入DefaultProcessSlotChain调用
+
+```java 
+@Override
+    public void entry(Context context, ResourceWrapper resourceWrapper, Object t, int count, boolean prioritized, Object... args)
+        throws Throwable {
+        first.transformEntry(context, resourceWrapper, t, count, prioritized, args);
+    }
+```
+
+
+
+
+
+
+
+2.StatisticSlot.entry()方法 核心类 负责统计一系列信息,里面try catch BlockException，Throwable 包裹之后链式调用的代码,fireEntry方法执行后续的逻辑代码。里面有关限流的是FlowSlot 有关降级的是DegradeSlot类。
+
+```txt 
+常见的限流算法
+1. 计数法
+统计固定时间端段内的交易量大小。如果指定时间端内的交易量超过，拒绝交易
+**缺点：无法统计当前交易所在时间点之前时间段交易量的大小，计数法精度不准确**
+
+
+
+2. 滑动窗口算法
+将固定时间段划分为多个时间窗口，每个窗口维护自己的独立计数器。
+每次计算请求的数量,统计当前时间点所在事件窗口与之前一定数量事件窗口的请求数量之和。
+**限流 快速失败的底层算法的实现**
+
+
+
+3. 漏桶算法 leaky bucket
+桶的容量capacity   最多存放的请求数 
+桶的水 water  桶实际存储的请求数
+timestamp 当前时间戳
+
+水漏出的速度 rate  每秒系统能处理的请求数 
+
+
+
+每次请求，water减去系统以一定速率处理的请求量。
+看water+1是否超过capactiry,如果超过直接拒绝
+如果没有超过，放行。
+**限流  排队等待执行的底层算法实现**
+
+
+
+4. 令牌算法 token bucket
+桶的容量 capacity 最多存放的请求数
+令牌数 tokens 当前桶的令牌数量
+令牌放入的速度 rate  
+
+timestamp 当前时间戳
+
+
+
+后台以固定的速率像桶放入令牌数量。如果满了的话直接丢弃。
+令牌桶如果令牌不足，返回请求失败。
+如果有令牌的话，放行请求。正常减少令牌。
+**限流 预热执行的底层算法实现**
+```
+
+#####a,StatisicSlot 的准备工作
+
+​    DefaultNode.addPassRequest(int count) -------->super(StatisicNode.addPassRequest)
+
+```java 
+ RuleConstant.DEFAULT_WINDOW_INTERVAL_MS;默认是1000
+//====================StatisicNode=========================================
+private transient volatile Metric rollingCounterInSecond = new ArrayMetric(SampleCountProperty.SAMPLE_COUNT, IntervalProperty.INTERVAL);
+//====================ArrayMetric===========================================
+public ArrayMetric(int sampleCount, int intervalInMs) {
+    this.data = new OccupiableBucketLeapArray(sampleCount, intervalInMs);
+}
+//================OccupiableBucketLeapArray===================================
+public OccupiableBucketLeapArray(int sampleCount, int intervalInMs) {
+    // This class is the original "CombinedBucketArray".
+    super(sampleCount, intervalInMs);
+    this.borrowArray = new FutureBucketLeapArray(sampleCount, intervalInMs);
+}
+//==================LeapArray=================================================
+public LeapArray(int sampleCount, int intervalInMs) {
+    AssertUtil.isTrue(sampleCount > 0, "bucket count is invalid: " + sampleCount);
+    AssertUtil.isTrue(intervalInMs > 0, "total time interval of the sliding window should be positive");
+    AssertUtil.isTrue(intervalInMs % sampleCount == 0, "time span needs to be evenly divided");
+    //窗口的时间跨度=统计的时间跨度/窗口数量
+    this.windowLengthInMs = intervalInMs / sampleCount;
+    this.intervalInMs = intervalInMs;
+    this.sampleCount = sampleCount;
+    //创建一个窗口数量的数组
+    this.array = new AtomicReferenceArray<>(sampleCount);
+}
+
+```
+
+
+
+
+
+
+
+##### b,StatisicSlot 被 ProcessChainSlot链式的调用。
+
+1. fireEntry方法会继续调用下一层链条
+
+2. addPassRequest(int count) 如果成功通过一条，进入此方法
+
+3. ArrayMetric 取出当前时间戳对应的时间窗口 windowWrap 里面的value其实是一个MetricBucket对象。
+
+4. **windowWrap获取的逻辑**
+
+	时间窗口的下标Index
+
+	```java 
+	// timeId = 当前时间戳/窗口的时间跨度
+	long timeId = timeMillis / windowLengthInMs;
+	// 当前时间戳所在的时间窗口索引=(当前时间戳/窗口的时间跨度) % /时间窗口的数量
+	// Calculate current index so we can map the timestamp to the leap array.
+	return (int)(timeId % array.length());
+	```
+
+	
+
+	时间窗口的开始时间点
+
+	```java 
+	 //当前时间戳所在时间窗口的开始时间点=当前时间戳-(当前时间戳 % 时间窗口的时间跨度)
+	        return timeMillis - timeMillis % windowLengthInMs;
+	```
+
+	
+
+	while(true) 循环 WindowWrap<T> old = array.get(idx);
+
+	a. 如果没有时间窗口，根据当前时间戳初始化一个时间窗口，放入数组当中
+
+	b.如果获取的时间窗口的开始时间点与当前时间戳的相同，直接获取已有时间窗口
+
+	c.如果获取的时间窗口的开始时间点小于当前时间戳，那么需要使用初始化一个当前时间戳的时间窗口，替换掉已有的时间窗口。(这就是滑动的实现)
+
+	d.如果有人修改系统时间，那么出现获取的时间窗口大于当前时间戳，那么直接返回一个新的时间窗口
+
+	
+
+5. MetricBucket对象的addPass(int count) 方法，根据枚举Metric.Pass直接把自己内部的LongAddr类型的数组Pass位置下标的值加上count.这里的LongAddr是在多线程环境下比AtomicLong效率高的原子类。
+
+```java 
+//====================StatisticSlot=============================================
+public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node, int count,
+                  boolean prioritized, Object... args) throws Throwable {
+    try {
+        // Do some checking.
+        fireEntry(context, resourceWrapper, node, count, prioritized, args);
+
+        // Request passed, add thread count and pass count.
+        node.increaseThreadNum();
+        node.addPassRequest(count);
+        //=================StaticicNode===================================================
+        public void addPassRequest(int count) {
+            //分别创建秒，分钟级别的时间窗口对象
+            rollingCounterInSecond.addPass(count);
+            rollingCounterInMinute.addPass(count);
+        }
+        //=================ArrayMetric====================================
+        public void addPass(int count) {
+            //这里的data对象实际是OccupiableBucketLeapArray对象
+            WindowWrap<MetricBucket> wrap = data.currentWindow();
+            wrap.value().addPass(count);
+        }
+  //======================WindoWrap==========================================
+        public WindowWrap<T> currentWindow(long timeMillis) {
+            if (timeMillis < 0) {
+                return null;
+            }
+            //根据当前时间戳,计算当前时间戳所在的时间窗口
+            int idx = calculateTimeIdx(timeMillis);
+            // Calculate current bucket start time.
+            //根据当前时间戳，计算当前时间戳所在时间窗口的开始时间点
+            long windowStart = calculateWindowStart(timeMillis);
+
+            /*
+         * Get bucket item at given time from the array.
+         *
+         * (1) Bucket is absent, then just create a new bucket and CAS update to circular array.
+         * (2) Bucket is up-to-date, then just return the bucket.
+         * (3) Bucket is deprecated, then reset current bucket and clean all deprecated buckets.
+         */
+            while (true) {
+                //获取指定的时间窗口
+                WindowWrap<T> old = array.get(idx);
+                //如果为空，说明暂时未有此时间窗口，需要初始化时间窗口
+                if (old == null) {
+                    /*
+                 *     B0       B1      B2    NULL      B4
+                 * ||_______|_______|_______|_______|_______||___
+                 * 200     400     600     800     1000    1200  timestamp
+                 *                             ^
+                 *                          time=888
+                 *            bucket is empty, so create new and update
+                 *
+                 * If the old bucket is absent, then we create a new bucket at {@code windowStart},
+                 * then try to update circular array via a CAS operation. Only one thread can
+                 * succeed to update, while other threads yield its time slice.
+                 */
+                    WindowWrap<T> window = new WindowWrap<T>(windowLengthInMs, windowStart, newEmptyBucket(timeMillis));
+                    //cas 防止并发，更新时间窗口数组
+                    if (array.compareAndSet(idx, null, window)) {
+                        // Successfully updated, return the created bucket.
+                        return window;
+                    } else {
+                        //降低获取CPU执行权的优先级，让时间窗口被别的线程初始化，之后第二次循环再来获取
+                        // Contention failed, the thread will yield its time slice to wait for bucket available.
+                        Thread.yield();
+                    }
+                    //判断当前窗口的开始时间点与已有的时间窗口的开始时间点是否相同，如果相同的话，直接返回此时间窗口对象
+                } else if (windowStart == old.windowStart()) {
+                    /*
+                 *     B0       B1      B2     B3      B4
+                 * ||_______|_______|_______|_______|_______||___
+                 * 200     400     600     800     1000    1200  timestamp
+                 *                             ^
+                 *                          time=888
+                 *            startTime of Bucket 3: 800, so it's up-to-date
+                 *
+                 * If current {@code windowStart} is equal to the start timestamp of old bucket,
+                 * that means the time is within the bucket, so directly return the bucket.
+                 */
+                    return old;
+                    //如果当前窗口的开始时间点大于已有的时间窗口的开始时间点的话,说明当前时间窗口的时间点已经不适用于当前时间戳
+                    //需要清除旧有时间窗口，并且初始化一个新的时间窗口.
+                } else if (windowStart > old.windowStart()) {
+                    /*
+                 *   (old)
+                 *             B0       B1      B2    NULL      B4
+                 * |_______||_______|_______|_______|_______|_______||___
+                 * ...    1200     1400    1600    1800    2000    2200  timestamp
+                 *                              ^
+                 *                           time=1676
+                 *          startTime of Bucket 2: 400, deprecated, should be reset
+                 *
+                 * If the start timestamp of old bucket is behind provided time, that means
+                 * the bucket is deprecated. We have to reset the bucket to current {@code windowStart}.
+                 * Note that the reset and clean-up operations are hard to be atomic,
+                 * so we need a update lock to guarantee the correctness of bucket update.
+                 *
+                 * The update lock is conditional (tiny scope) and will take effect only when
+                 * bucket is deprecated, so in most cases it won't lead to performance loss.
+                 */
+                    //防止并发
+                    if (updateLock.tryLock()) {
+                        try {
+                            //重置时间窗口
+                            // Successfully get the update lock, now we reset the bucket.
+                            return resetWindowTo(old, windowStart);
+                        } finally {
+                            updateLock.unlock();
+                        }
+                    } else {
+                        // Contention failed, the thread will yield its time slice to wait for bucket available.
+                        Thread.yield();
+                    }
+                } else if (windowStart < old.windowStart()) {
+                    // Should not go through here, as the provided time is already behind.
+                    return new WindowWrap<T>(windowLengthInMs, windowStart, newEmptyBucket(timeMillis));
+                }
+            }
+        }
+```
+
+
+
+
+
+##### c.检测限流的SLOT：FlowSlot
+
+1.checkFlow方法校验限流
+
+```java 
+public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node, int count,
+                  boolean prioritized, Object... args) throws Throwable {
+    checkFlow(resourceWrapper, context, node, count, prioritized);
+
+    fireEntry(context, resourceWrapper, node, count, prioritized, args);
+}
+```
+
+2.首先获取限流规则，判断是否是QPS还是别的
+
+```JAVA 
+  public void checkFlow(Function<String, Collection<FlowRule>> ruleProvider, ResourceWrapper resource,
+                          Context context, DefaultNode node, int count, boolean prioritized) throws BlockException {
+        //如果限流规则为空的话，直接返回通过
+        if (ruleProvider == null || resource == null) {
+            return;
+        }
+        //获取限流规则FlowRule
+        Collection<FlowRule> rules = ruleProvider.apply(resource.getName());
+        if (rules != null) {
+            //遍历，看是否满足每一个定义的限流规则
+            for (FlowRule rule : rules) {
+                //检测限流规则，不满足的话直接抛出FlowExecption 外层StatisicSlot会进行捕捉异常，并做相应处理
+                if (!canPassCheck(rule, context, node, count, prioritized)) {
+                    //如果不符合限流异常，直接抛出FLOW EXCEPTION
+                    throw new FlowException(rule.getLimitApp(), rule);
+                }
+            }
+        }
+    }
+```
+
+
+
+3.进入校验限流方法
+
+```java 
+    public boolean canPassCheck(/*@NonNull*/ FlowRule rule, Context context, DefaultNode node, int acquireCount,
+                                                    boolean prioritized) {
+        //获取limitApp
+        String limitApp = rule.getLimitApp();
+        if (limitApp == null) {
+            return true;
+        }
+
+        if (rule.isClusterMode()) {
+            return passClusterCheck(rule, context, node, acquireCount, prioritized);
+        }
+        //真正校验限流规则的方法
+        return passLocalCheck(rule, context, node, acquireCount, prioritized);
+    }
+```
+
+4.这里会选择不同的限流策略 可以有预热，快速失败（默认)  ,等待队列等。
+
+```java 
+  private static boolean passLocalCheck(FlowRule rule, Context context, DefaultNode node, int acquireCount,
+                                          boolean prioritized) {
+        //获取对应的限流策略
+        Node selectedNode = selectNodeByRequesterAndStrategy(rule, context, node);
+        if (selectedNode == null) {
+            return true;
+        }
+       //此处对应不同实现有WarmUpController,DefaultController,RateLimiterController,WarmRateLimitController
+        return rule.getRater().canPass(selectedNode, acquireCount, prioritized);
+    }
+```
+
+##### 直接失败的实现滑动时间窗口统计 DefaultController
+
+```java 
+public boolean canPass(Node node, int acquireCount, boolean prioritized) {
+    //根据当前请求的时间戳，获取对应时间窗口的QPS
+    int curCount = avgUsedTokens(node);
+    //如果当前请求达到的QPS超过RULE的 QPS 那么直接返回false
+    if (curCount + acquireCount > count) {
+        if (prioritized && grade == RuleConstant.FLOW_GRADE_QPS) {
+            long currentTime;
+            long waitInMs;
+            currentTime = TimeUtil.currentTimeMillis();
+            waitInMs = node.tryOccupyNext(currentTime, acquireCount, count);
+            if (waitInMs < OccupyTimeoutProperty.getOccupyTimeout()) {
+                node.addWaitingRequest(currentTime + waitInMs, acquireCount);
+                node.addOccupiedPass(acquireCount);
+                sleep(waitInMs);
+
+                // PriorityWaitException indicates that the request will pass after waiting for {@link @waitInMs}.
+                throw new PriorityWaitException(waitInMs);
+            }
+        }
+        return false;
+    }
+    return true;
+}
+```
+
+pass方法直接累加获取之前所有时间窗口的请求总量，看是否超过了指定的阈值,如果超过直接抛出FlowException会被StatisticNode捕捉到
+
+```java 
+    public long pass() {
+        //获取当前时间窗口
+        data.currentWindow();
+        long pass = 0;
+        //获取所有时间窗口的请求数量，用一个list存储
+        List<MetricBucket> list = data.values();
+        //累加所有时间窗口的请求数量
+        for (MetricBucket window : list) {
+            pass += window.pass();
+        }
+        return pass;
+    }
+```
+
+
+
+##### 等待队列的实现漏桶限流统计
+
+RateLimiterController
+
+```java 
+public boolean canPass(Node node, int acquireCount, boolean prioritized) {
+    // Pass when acquire count is less or equal than 0.
+    if (acquireCount <= 0) {
+        return true;
+    }
+    // Reject when count is less or equal than 0.
+    // Otherwise,the costTime will be max of long and waitTime will overflow in some cases.
+    if (count <= 0) {
+        return false;
+    }
+    //获取当前时间戳
+    long currentTime = TimeUtil.currentTimeMillis();
+    // Calculate the interval between every two requests.
+    //获取当前等待队列规则下每笔交易的平均耗时
+    long costTime = Math.round(1.0 * (acquireCount) / count * 1000);
+
+    // Expected pass time of this request.
+    //计算正常的预期时间点
+    long expectedTime = costTime + latestPassedTime.get();
+    //如果小于说明此速率不会超过设置的限流阈值
+    if (expectedTime <= currentTime) {
+        // Contention may exist here, but it's okay.
+        latestPassedTime.set(currentTime);
+        return true;
+    } else {
+        // Calculate the time to wait.
+        long waitTime = costTime + latestPassedTime.get() - TimeUtil.currentTimeMillis();
+        //超过最大等待时间的话，直接返回false
+        if (waitTime > maxQueueingTimeMs) {
+            return false;
+        } else {
+            //计算应该到达的时间点
+            long oldTime = latestPassedTime.addAndGet(costTime);
+            try {
+                //计算此条请求需要等待的时间
+                waitTime = oldTime - TimeUtil.currentTimeMillis();
+                if (waitTime > maxQueueingTimeMs) {
+                    latestPassedTime.addAndGet(-costTime);
+                    return false;
+                }
+                // in race condition waitTime may <= 0
+                //让线程直接睡眠 等待的时间
+                if (waitTime > 0) {
+                    Thread.sleep(waitTime);
+                }
+                return true;
+            } catch (InterruptedException e) {
+            }
+        }
+    }
+    return false;
+}
+```
+
+
+
+##### 降级失败的实现:DegradeSlot
+
+1.监控方法调用 完成之后，调用ProcessCHain再次走一遍Exit链条
+
+```java 
+ finally {
+            if (entry != null) {
+                //在调用方法结束之后调用exit 链条
+                entry.exit(1, pjp.getArgs());
+            }
+        }
+```
+
+2.DegradeSlot的exit方法
+
+```java 
+ public void exit(Context context, ResourceWrapper r, int count, Object... args) {
+        Entry curEntry = context.getCurEntry();
+        if (curEntry.getBlockError() != null) {
+            fireExit(context, r, count, args);
+            return;
+        }
+        List<CircuitBreaker> circuitBreakers = DegradeRuleManager.getCircuitBreakers(r.getName());
+        if (circuitBreakers == null || circuitBreakers.isEmpty()) {
+            fireExit(context, r, count, args);
+            return;
+        }
+
+        if (curEntry.getBlockError() == null) {
+            // passed request
+            for (CircuitBreaker circuitBreaker : circuitBreakers) {
+                //这里如果发生异常，可能触发断路器的全开状态
+                circuitBreaker.onRequestComplete(context);
+            }
+        }
+
+        fireExit(context, r, count, args);
+    }
+```
+
+3.ResponseTimeCircuitBreaker
+
+```java 
+    private void handleStateChangeWhenThresholdExceeded(long rt) {
+        if (currentState.get() == State.OPEN) {
+            return;
+        }
+        if (currentState.get() == State.HALF_OPEN) {
+            // In detecting request
+            // TODO: improve logic for half-open recovery
+            //从半开状态恢复至全开状态
+            if (rt > maxAllowedRt) {
+                fromHalfOpenToOpen(1.0d);
+            }
+            //从半开状态到关闭状态
+            else {
+                fromHalfOpenToClose();
+            }
+            return;
+        }
+```
+
+4.调用之前也会修改相应的断路器状态判断是否让断路器处于半开状态，决定是否调用降级.
+
+```java 
+ public void entry(Context context, ResourceWrapper resourceWrapper, DefaultNode node, int count,
+                      boolean prioritized, Object... args) throws Throwable {
+        performChecking(context, resourceWrapper);
+
+        fireEntry(context, resourceWrapper, node, count, prioritized, args);
+    }
+```
+
+```java 
+   void performChecking(Context context, ResourceWrapper r) throws BlockException {
+        //获取断路器规则
+        List<CircuitBreaker> circuitBreakers = DegradeRuleManager.getCircuitBreakers(r.getName());
+        if (circuitBreakers == null || circuitBreakers.isEmpty()) {
+            return;
+        }
+        //遍历根据每一个断路器判断是否符合降级规则
+        for (CircuitBreaker cb : circuitBreakers) {
+            if (!cb.tryPass(context)) {
+                throw new DegradeException(cb.getRule().getLimitApp(), cb.getRule());
+            }
+        }
+    }
+```
+
+```java 
+ public boolean tryPass(Context context) {
+        // Template implementation.
+        //如果断路器的状态为关的话，通过
+        if (currentState.get() == State.CLOSED) {
+            return true;
+        }
+        //如果为开的话,进行重试判断或者把断路器由全开转变为半开状态
+        if (currentState.get() == State.OPEN) {
+            // For half-open state we allow a request for probing.
+            //retryTimeoUT判断是否到了断路器的最大持续时间，如果没有再次熔断，否则尝试开启断路器的半开状态
+            return retryTimeoutArrived() && fromOpenToHalfOpen(context);
+        }
+        return false;
+    }
+```
+
+```java 
+protected boolean fromOpenToHalfOpen(Context context) {
+    //如果从全开状态修改为半开状态成功，会返回成功。不会进行熔断处理
+    if (currentState.compareAndSet(State.OPEN, State.HALF_OPEN)) {
+        notifyObservers(State.OPEN, State.HALF_OPEN, null);
+        Entry entry = context.getCurEntry();
+        entry.whenTerminate(new BiConsumer<Context, Entry>() {
+            @Override
+            public void accept(Context context, Entry entry) {
+                // Note: This works as a temporary workaround for https://github.com/alibaba/Sentinel/issues/1638
+                // Without the hook, the circuit breaker won't recover from half-open state in some circumstances
+                // when the request is actually blocked by upcoming rules (not only degrade rules).
+                //如果半路断路器发起的那次请求依然发生异常，再次恢复断路器状态为全开
+                if (entry.getBlockError() != null) {
+                    // Fallback to OPEN due to detecting request is blocked
+                    currentState.compareAndSet(State.HALF_OPEN, State.OPEN);
+                    notifyObservers(State.HALF_OPEN, State.OPEN, 1.0d);
+                }
+            }
+        });
+        return true;
+    }
+    return false;
+}
+```
+
+
+
+
+
+## 5.微服务分布式事务
+
+#### 应用实例 Seata
+
+####1.
+
+
+
+
+
+
+
+## 6.微服务网关
+
+#### 应用实例:SpringCloud GateWay
+
+#### 1.为什么要微服务网关？
+
+1. 如果微服务很多的话，前端调用系统 调用的时候需要维护很多IP，端口列表，并且一旦发生变动，前端就得自己维护。不灵活。
+
+
+
+#### 2.微服务网关的作用
+
+1. 路由负载均衡转发
+2. 流量限制
+3. 权限校验
+
+
+
+#### 3.SpringCloud-GateWay  入门使用
+
+1. 导入spring-cloud-gateway-starter pom
+2. 导入spring-boot-actuator 依赖 开放部分url
+3. application.properties  开启springcloud.gateway配置
+4. springcloud-gateway需要注册中心，来发现服务，所以需要将将自己注册到注册中心。
+
+
+
+ Predicate 路由断言工厂  里面定义自己的逻辑可以
+
+Filter过滤工厂
+
+
+
+#### SpringCloud-GateWay源码分析
+
+#### 1.springcloud  gateway-starter
+
+导入 gateway-core  spring.factories文件大量的配置类记载，其中重要的包括@GateWayAutoConfiguration
+
+包括：
+
+路由工厂BEAN
+
+过滤工厂BEAN
+
+NettyConfiguration
+
+LoadBalanceClientConfiguiration 
+
+......
+
+
+
+####2.netty框架搭建的IO通信模型
+
+请求的入口 netty  服务端通过触发read事件捕捉到请求，交给相应的handler处理(DispatchHandler)
+
+```java 
+public Mono<Void> handle(ServerWebExchange exchange) {
+		if (this.handlerMappings == null) {
+			return createNotFoundError();
+		}
+		return Flux.fromIterable(this.handlerMappings)
+				.concatMap(mapping -> mapping.getHandler(exchange))
+				.next()
+				.switchIfEmpty(createNotFoundError())
+				.flatMap(handler -> invokeHandler(exchange, handler))
+				.flatMap(result -> handleResult(exchange, result));
+	}
+
+```
+
+
+
+#### 3.mapping.getHandler()  匹配对应的路由工厂 
+
+通过获取RoutePredicateFactory,调用它的test方法来 匹配对应的路由。
+
+```java 
+//=====================AbstractHandlerMapping================================================================
+public Mono<Object> getHandler(ServerWebExchange exchange) {
+		return getHandlerInternal(exchange).map(handler -> {
+			if (logger.isDebugEnabled()) {
+				logger.debug(exchange.getLogPrefix() + "Mapped to " + handler);
+			}
+			ServerHttpRequest request = exchange.getRequest();
+			if (hasCorsConfigurationSource(handler) || CorsUtils.isPreFlightRequest(request)) {
+				CorsConfiguration config = (this.corsConfigurationSource != null ? this.corsConfigurationSource.getCorsConfiguration(exchange) : null);
+				CorsConfiguration handlerConfig = getCorsConfiguration(handler, exchange);
+				config = (config != null ? config.combine(handlerConfig) : handlerConfig);
+				if (!this.corsProcessor.process(config, exchange) || CorsUtils.isPreFlightRequest(request)) {
+					return REQUEST_HANDLED_HANDLER;
+				}
+			}
+			return handler;
+		});
+	}
+//====================RoutePredicateHandlerMapping==================================================
+protected Mono<?> getHandlerInternal(ServerWebExchange exchange) {
+		// don't handle requests on management port if set and different than server port
+		if (this.managementPortType == DIFFERENT && this.managementPort != null
+				&& exchange.getRequest().getURI().getPort() == this.managementPort) {
+			return Mono.empty();
+		}
+		exchange.getAttributes().put(GATEWAY_HANDLER_MAPPER_ATTR, getSimpleName());
+
+		return lookupRoute(exchange)
+				// .log("route-predicate-handler-mapping", Level.FINER) //name this
+				.flatMap((Function<Route, Mono<?>>) r -> {
+					exchange.getAttributes().remove(GATEWAY_PREDICATE_ROUTE_ATTR);
+					if (logger.isDebugEnabled()) {
+						logger.debug(
+								"Mapping [" + getExchangeDesc(exchange) + "] to " + r);
+					}
+
+					exchange.getAttributes().put(GATEWAY_ROUTE_ATTR, r);
+					return Mono.just(webHandler);
+				}).switchIfEmpty(Mono.empty().then(Mono.fromRunnable(() -> {
+					exchange.getAttributes().remove(GATEWAY_PREDICATE_ROUTE_ATTR);
+					if (logger.isTraceEnabled()) {
+						logger.trace("No RouteDefinition found for ["
+								+ getExchangeDesc(exchange) + "]");
+					}
+				})));
+	}
+```
+
+
+
+
+
+####4.getHandler()之后 获取到相应的handlerAdaptor  simpleHandler
+
+包括FilterAdaptor获取全局GlobalFilter 并且把过滤器按照责任链模式进行调用
+
+```java 
+//==============================SimpleHandlerAdaptor======================
+public Mono<HandlerResult> handle(ServerWebExchange exchange, Object handler) {
+		WebHandler webHandler = (WebHandler) handler;
+		Mono<Void> mono = webHandler.handle(exchange);
+		return mono.then(Mono.empty());
+	}
+//=======================FilteringWebHandler=========================================
+public Mono<Void> handle(ServerWebExchange exchange) {
+		Route route = exchange.getRequiredAttribute(GATEWAY_ROUTE_ATTR);
+		List<GatewayFilter> gatewayFilters = route.getFilters();
+
+		List<GatewayFilter> combined = new ArrayList<>(this.globalFilters);
+		combined.addAll(gatewayFilters);
+		// TODO: needed or cached?
+		AnnotationAwareOrderComparator.sort(combined);
+
+		if (logger.isDebugEnabled()) {
+			logger.debug("Sorted gatewayFilterFactories: " + combined);
+		}
+
+		return new DefaultGatewayFilterChain(combined).filter(exchange);
+	}
+
+```
+
+
+
+#### 5.通过LoadBanlancerFilter 来实现调用的负载均衡
+
+LoadBanlancerFilter 也会被自动装配，并且实例化对象 传入到过滤器链上
+
+```java 
+public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
+		URI url = exchange.getAttribute(GATEWAY_REQUEST_URL_ATTR);
+		String schemePrefix = exchange.getAttribute(GATEWAY_SCHEME_PREFIX_ATTR);
+		if (url == null
+				|| (!"lb".equals(url.getScheme()) && !"lb".equals(schemePrefix))) {
+			return chain.filter(exchange);
+		}
+		// preserve the original url
+		addOriginalRequestUrl(exchange, url);
+
+		if (log.isTraceEnabled()) {
+			log.trace("LoadBalancerClientFilter url before: " + url);
+		}
+
+		final ServiceInstance instance = choose(exchange);
+
+		if (instance == null) {
+			throw NotFoundException.create(properties.isUse404(),
+					"Unable to find instance for " + url.getHost());
+		}
+
+		URI uri = exchange.getRequest().getURI();
+
+		// if the `lb:<scheme>` mechanism was used, use `<scheme>` as the default,
+		// if the loadbalancer doesn't provide one.
+		String overrideScheme = instance.isSecure() ? "https" : "http";
+		if (schemePrefix != null) {
+			overrideScheme = url.getScheme();
+		}
+
+		URI requestUrl = loadBalancer.reconstructURI(
+				new DelegatingServiceInstance(instance, overrideScheme), uri);
+
+		if (log.isTraceEnabled()) {
+			log.trace("LoadBalancerClientFilter url chosen: " + requestUrl);
+		}
+
+		exchange.getAttributes().put(GATEWAY_REQUEST_URL_ATTR, requestUrl);
+		return chain.filter(exchange);
+	}
+
+```
+
+
+
+
+
+
+
+
+
+
+
 spring-cloud 服务治理
 eureka
 consul

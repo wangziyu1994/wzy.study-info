@@ -1,0 +1,210 @@
+#### 1.什么是Mybatis?
+
+1. Mybatis是一款java处理与数据交互操作的框架。对JDBC进行了一层封装，主要核心功能是：
+
+	1. 类型转换 JavaType-->JdbcType  JDBCtype--->javaType   封装处理ResultSet结果集过程，以及入参处理过程
+	2. 动态SQL拼接
+	3. 一级二级缓存数据结果集功能
+
+	
+
+
+
+#### 2.什么是ORM？
+
+ObjectRelationalMapping 对象关系映射
+
+javaType  转化为Jdbc Type 持久化到数据库中
+
+
+
+#### 3.为什么Mybatis是半自动ORM映射工具?
+
+mybatis在查询数据时，SQL的编写 结果集的映射依然要程序员手动编写SQL和resultMap来完成。所以mybatis是半自动化ORM
+
+hibernate是全自动化，它是自己维护一个HQL，通过HQL实现全自动化ORM。
+
+
+
+#### 4.Mybatis是如何解决JDBC的问题的？
+
+1. 数据库连接 通过dataSource可以配置连接池，只有用SqlSessionFactory sqlSession.OpenSession()来创建数据库连接.
+2. 参数的映射，结果集的映射，获取 mybatis通过resultMap #{param}来完成映射
+3. mapper文件将java代码和SQL语句分离出来.
+
+
+
+#### 5. Mybatis的编程步骤
+
+1. 创建全局配置文件，mapper配置文件.
+
+2. SqlSessionFactoryBuilder通过全局配置文件build出DefaultSqlSessionFactory对象
+
+3. DefaultSqlSessionFactory 的openSession()对象创建出DefaultSqlSession对象
+
+4. DefaultSqlSession.getMapper()可以动态代理，获取Mapper对象对数据库进行操作。
+
+	**5. DefaultSqlSession的commit 提交事务**
+
+	**6.DefaultSqlSession的close关闭SqlSession**
+
+
+
+
+
+
+
+#### 6.Mybatis工作原理
+
+1. SqlSessionFactoryBuilder
+2. SqlSessionFactory
+3. SqlSession
+4. Executor------------>拿到MappedStatement,输入参数映射，输出结果映射
+
+
+
+
+
+#### 7.Mybatis三种执行类型
+
+1. 简单执行 SimpleEXexutorType 每次创建新的statement对象
+2. 重新使用statement ReuseExecutorType 以SQL为key缓存已经执行的statement对象，如果存在直接复用。
+3. 批处理执行 BatchExecutorType 等待多条SQL，一起执行与JDBC批处理相同
+
+
+
+
+
+#### 8.Mybatis是否支持延迟加载？
+
+**支持，在遇到结果集有associate或者Collection标签是的结果，如果配置文件指定了lazyLoadEnabled=true延迟加载的话，那么就会在真正get()这个属性时，才会真正的查询**
+
+
+
+**原理：cglib动态代理,对目标对象进行代理，在目标对象的所有get方法上增加拦截，如果这个属性的值为空的话，那么进行查询数据库逻辑**
+
+
+
+
+
+#### 9.#{}  ${} 区别
+
+1. mybatis在构建SqlSessionFactory的时候，如果SQL中没有包含${}，那么此时会直接 将#{}替换成PreparedStatement占位符?，产生PrepareStatement对象. 如果包含的话，则暂时不做处理。
+2. mybatis在SqlSession的执行阶段。如果SQL中包含${}那么会将${} 原样拼接。再将#{}替换成？产生PreparedStatement对象。
+
+
+
+所以#{}实际解析方式是PS的预编译模式。那么传入的所有值，都只会被SQL的服务器当成参数处理。不会当成SQL语句。而${} 如果传入恶意SQL，那么Mybatis会原样拼接，而不仅仅被当作参数处理。因此就会产生SQL注入问题.
+
+
+
+#### 10.解决like 的参数传递问题.
+
+1. **"%"  ‘ ${}’     "%"**  注意SQL中 如果引号中显示引号，那么需要额外再添加一个引号 ' ' ' '   这样显示'
+2. concat(%,${})
+3. java代码定义传入参数 拼接%${}%
+4. mybatis bind标签
+
+
+
+#### 11.Mybatis传入多个参数
+
+1. 按顺序传入 按顺序写SQL语句 按顺序一一对应  #{Param1}  #{Param2} .....
+2. 使用注解@Param() 修饰映射。
+3. 默认与javaBean的属性对应
+4. 使用Map 其中入参名称与Map的key保持一致
+
+
+
+#### 12.Mybati mapper接口绑定的原理
+
+1. mybatis再sqlsession.getMapper()的时候，对此接口进行了jdk的动态代理。为此Mapper接口生成了一个代理对象。其中拦截的invoke逻辑定义在MapperProxy.invoke中
+
+
+
+#### 13.Mybatis动态标签原理
+
+有choose  foreach  if trim等动态SQL标签。
+
+原理根据ognl从sql参数中解析条件表达式的值，根据表达式的值，动态拼接SQL。
+
+
+
+
+
+#### 14.Mybatis分页
+
+//拦截Executor对象，方便用户进行代理，拓展功能
+    executor = (Executor) interceptorChain.pluginAll(executor);  在此处pluginAll方法中
+
+主要有4个拦截的地方
+
+1. executorHandler
+2. parameterHandler
+3. statementHandler
+4. ResultSetHander
+
+mybatis可以通过自定义分页Inteceptor来实现分页功能
+
+1. 自定义好Inteceptor的实现类，里面用@Intecepts(@Signal())指定好要拦截的类与方法.
+2. intecetpor实现类中定义好自己需要拓展的逻辑代码
+3. 将实现类加入mybatis全部配置文件中的plugin中
+
+
+
+#### 15.Mybatis一级缓存
+
+一级缓存：在BaseExecutor里面有个PrepualCache属性对象。它内部的Map就是一级缓存。
+
+1. SqlSessionFactory.OpenSession()方法会创建Executor 其中创建SimpleExecutor继承BaseExecutor.每次OpenSession都会创建一个新的SimpleExecutor，而PrepualCache又是BaseExecutor的一个属性。因此两个不同的SqlSession 一级缓存不同。
+2. 每次执行数据库查询，拿mapper的namespace+sqlId+ 参数作为键去map里查询，如果没有，查询数据库更新，否则直接用map里的value.
+
+3. 每次增删改 清除一级缓存。每次sqlSession关闭，清除一级缓存。
+4. 如果查询设置了flushCache为true,每次执行此查询之前清除一级缓存。
+
+
+
+使用条件：
+
+1. 同一SqlSeesion
+2. 相同Mapper namespace sqlid并且参数值一样。
+3. 两次查询中间不能有增删改操作。
+4. sqlStatement的属性 flushCache不能开启
+
+
+
+
+
+####16.Mybatis二级缓存
+
+二级缓存：在MappedAssitStatement的currentCache属性当中,之后会通过Builder方法被每个MappedStatament的Cache属性引用
+
+装饰者模式创建二级缓存对象 
+
+base=new PreptualCache()-------->Map<Object, Object> cache = new HashMap<>(); 缓存真正的存储
+
+cache=new LruCache(base)---------->LRU算法 淘汰缓存
+
+cache=new ScheduledCache(cache)---------->定时清除缓存的
+
+cache=new SerializedCache(cache)----------> 开启readwrite属性 缓存的深拷贝
+
+cache=new LoggingCache(cache)---------->
+
+cache=new SynchronizedCache(base)---------->线程安全性的 put get ...等方法
+
+
+
+1. 每个数据库操作的CacheExecutor负责二级缓存的刷新，去除。获取此次操作MappedStatment对应的缓存Map.
+2. 它用TranstationManager的TransactionalCache来暂时存储数据库结果集，等到sqlsession.commit之后，才会真正将数据库结果更新到MappedStatement的缓存Map当中去。
+3. 同一MappedStatement的每一次增删改都会清除本MappedStatement的缓存Map
+4. 如果设置了查询清空缓存也会清除二级缓存。
+
+
+
+使用条件：
+
+1. 同一MappedStatement
+2. 同一SQLid,参数不变
+3. 在第一个查询完成commit之后，二级缓存才会真正存在值。
+

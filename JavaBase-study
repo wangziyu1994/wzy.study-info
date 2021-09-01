@@ -1,0 +1,137 @@
+## JDK1.8新特性 方法引用
+
+ 方法引用可以认为是Lambda表达式的一种特殊形式，Lambda表达式可以让开发者自定义抽象方法的实现代码，方法引用则可以让开发者直接引用已存在的实现方法，作为Lambda表达式的Lambda体(**参数列表得一致**)。 
+
+
+
+#### 1.静态方法引用
+
+类名::方法名
+
+```java 
+  MyFunctionInter<Integer, String> myFunctionInter3=AClass::getStr;
+```
+
+
+
+
+
+#### 2.实例方法引用
+
+对象名:方法名
+
+```java 
+ MyFunctionInter<String, String> myFunctionInter4=aClass::getInsStr;
+```
+
+
+
+
+
+#### 3.构造方法引用
+
+函数式接口必须返会构造方法所在的类
+
+```java 
+ MyInstanceInter<String,AClass> myInstanceInter=AClass::new;
+```
+
+
+
+
+
+#### 4.对象方法引用
+
+**如果实例方法和函数式接口匹配，**
+
+**如果函数式接口的比实例方法多一个参数，并且多出来的参数是第一个参数，其他参数类型相同。**
+
+**并且多出来的第一个参数的类型是实例方法所在的类或父类**
+
+**那么可以使用类名::实例方法名作为方法引用**
+
+```java 
+  MyObjectInter<BClass,String> myObjectInter2=BClass::BMethod;
+```
+
+
+
+
+
+
+
+# Class.getResource() ,ClassLoader.getResource()方法
+
+```java 
+  public static final String fileName="";
+System.out.println(this.getClass().getResource(fileName));
+System.out.println(this.getClass().getResource("/"+fileName));
+System.out.println(this.getClass().getClassLoader().getResource(fileName));
+System.out.println(this.getClass().getClassLoader().getResource("/"+fileName));
+```
+
+
+
+file:/D:/gitResposity-code/JavaBaseStudy/target/classes/com/wangziyu/resourcestudy/
+file:/D:/gitResposity-code/JavaBaseStudy/target/classes/
+file:/D:/gitResposity-code/JavaBaseStudy/target/classes/
+null
+
+###1.Class.getResource()方法
+
+1. Class.getResource("")方法   从当前类路径获取 resolveName 只保留类名
+2. Class.getResource("/")方法  从当前类加载器加载路径获取 resolveName  当前类加载器加载路径加上类的全限定类名
+3. getResourceAsStream方法与之获取路径方式相同
+
+最终也是调用ClassLoader.getResource方法
+
+
+
+### 2.ClassLoader.getResource()方法
+
+
+
+1. ClassLoader.getResource("")方法 从当前类加载器加载路径获取 
+2. ClassLoader.getResource("/")方法 无这种用法
+3. getResourceAsStream方法与之获取路劲方式相同
+
+
+
+# JDK Stream
+
+数组集合都能通过stream()方法获得Stream对象,流有中间操作，终端操作
+
+### 1.中间操作
+
+1. filter
+
+  filter() 传入过滤条件的lamda表达式
+
+2. map
+
+	把元素类型转化另外的类型
+
+
+
+###2.终端操作（只能有一个终端操作）
+
+1. match
+
+返回匹配条件的最终结果
+
+2. reduce
+
+传入计算的lamda表达式，返回计算后的结果
+
+3. collect/toArray 
+
+转换集合的类型，转变为另外一种类型。
+
+
+
+
+
+# System.getEnv('')   System.getProperty('')
+
+1. getEnv获取指定系统环境变量 PATH  System.getEnv() 获取所有
+2. getProperty获取指定有关本程序的全局环境变量。如果-D可以在启动时指定变量  System.getProperties()获取所有

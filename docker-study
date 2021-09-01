@@ -1,3 +1,30 @@
+1. yum install -y yum-utils dev ices-mapper-persistent-data lvm2
+2. yum-config-manager  --add-repo http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+3. yum install -y docker-ce
+4. 修改demo.json文件
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Docker Hub docker常用docker镜像官方仓库
 
 service docker start 启动docker服务

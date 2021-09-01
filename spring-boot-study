@@ -1,10 +1,414 @@
-## 1.SpringBoot 入门
+# 1.SpringBoot 入门使用
+
+##1.SpringBoot项目开发环境的搭建
+
+#### 1.idea 直接SpringInitalizer 选SpringWeb 自动搭建springboot 项目
+
+#### 2.application.properties 配置 spring.profile.active=dev 会在application-dev.properties寻找配置
+
+
+
+
+
+## 2.SpringBoot  Servlet,Filter,Listener的配置
+
+### 1.servlet
+
+1. @Configuation 使用ServletRegistration注册servlet
+
+2. 自定义Servlet加@WebServlet注解  定义ServletComponetScan扫描注解
+
+
+
+
+
+### 2.Filter
+
+1. @Configuration使用FilterRegistration注册Filter
+2. 自定义 Filter加@WebFilter 注解  定义ServletComponetScan扫描注解
+
+###3.Listener
+
+1. @Configuration使用ServletListenerRegistration注册Listener
+2. 自定义 Listener加@WebListener注解  定义ServletComponetScan扫描注解
+
+
+
+###4.静态资源在Resource  的public resource  static 目录下 js等资源可以通过Pom的web.jar引用
+
+
+
+###5.jar不能运作jsp  用模板引擎Thymeleaf替换
+
+
+
+
+
+##3.数据源配置
+
+默认使用spring.datasource配置  要使用自己的配置需要@ConfigurationProperties注入
+
+
+
+## 4.springboot-mybatis集成
+
+1. 引入mybatis-springboot-starter 启动器 jar
+2. application.properties 设置mybatis配置项
 
 
 
 
 
 
+
+# 2.SpringBoot源码解析
+
+### 1.准备阶段new SpringApplication()
+
+```java 
+public SpringApplication(ResourceLoader resourceLoader, Class<?>... primarySources) {
+		this.resourceLoader = resourceLoader;
+		Assert.notNull(primarySources, "PrimarySources must not be null");
+		this.primarySources = new LinkedHashSet<>(Arrays.asList(primarySources));
+		//一般默认返回Servlet
+		this.webApplicationType = WebApplicationType.deduceFromClasspath();
+		//加载实例化初始化器ApplicationContextInitializer，从spring.factories文件获取，反射创建实例放入SpringApplication的属性当中
+		setInitializers((Collection) getSpringFactoriesInstances(ApplicationContextInitializer.class));
+		//加载实例化监听器ApplicationListener，从spring.factories文件获取，反射创建实例放入SpringApplication的属性当中
+		setListeners((Collection) getSpringFactoriesInstances(ApplicationListener.class));
+		//设置main函数所在类
+		this.mainApplicationClass = deduceMainApplicationClass();
+	}
+
+
+
+```
+
+
+
+### 2.run阶段 SpringApplication.run()
+
+#### 1.广播start 监听事件到对应监听器
+
+org.springframework.boot.ClearCachesApplicationListener,\
+org.springframework.boot.builder.ParentContextCloserApplicationListener,\
+org.springframework.boot.cloud.CloudFoundryVcapEnvironmentPostProcessor,\
+org.springframework.boot.context.FileEncodingApplicationListener,\
+org.springframework.boot.context.config.AnsiOutputApplicationListener,\
+org.springframework.boot.context.config.ConfigFileApplicationListener,\
+org.springframework.boot.context.config.DelegatingApplicationListener,\
+org.springframework.boot.context.logging.ClasspathLoggingApplicationListener,\
+org.springframework.boot.context.logging.LoggingApplicationListener,\
+org.springframework.boot.liquibase.LiquibaseServiceLocatorApplicationListener
+
+```java 
+//=================================================================================
+public ConfigurableApplicationContext run(String... args) {
+		StopWatch stopWatch = new StopWatch();
+		stopWatch.start();
+		ConfigurableApplicationContext context = null;
+		Collection<SpringBootExceptionReporter> exceptionReporters = new ArrayList<>();
+		//图形界面有关
+		configureHeadlessProperty();
+		//从spring.factories当中获取SpringApplicationRunListener有关的监听器实例
+		SpringApplicationRunListeners listeners = getRunListeners(args);
+		//触发springrun监听器，并利用多播器，多播器，再反射构造的时候已经准备好，将事件广播到其他监听器
+		listeners.starting();
+```
+
+
+
+#### 2.准备ConfigurationEnvironemnt对象，里面包括System.env,System.property，命令行参数，配置文件
+
+```java 
+ApplicationArguments applicationArguments = new DefaultApplicationArguments(args);
+// 构件配置环境对象，包括解析命令行参数，配置文件存入Environment对象
+ConfigurableEnvironment environment = prepareEnvironment(listeners, applicationArguments);
+
+//============================================================================
+private ConfigurableEnvironment prepareEnvironment(SpringApplicationRunListeners listeners,
+                                                   ApplicationArguments applicationArguments) {
+    // Create and configure the environment
+    // 创建环境对象，如果是Servlet的话，那么就是StandardServletEnvironment对象,有servletContextInitParams/servletConfigInit属性
+    // 并且此对象含有System.env和System.properties对象
+    ConfigurableEnvironment environment = getOrCreateEnvironment();
+    // 将commndLineArgs放入Environment对象中
+    configureEnvironment(environment, applicationArguments.getSourceArgs());
+    ConfigurationPropertySources.attach(environment);
+    //envionment准备好之后，广播事件到对应监听者。
+    listeners.environmentPrepared(environment);
+    bindToSpringApplication(environment);
+    if (!this.isCustomEnvironment) {
+        environment = new EnvironmentConverter(getClassLoader()).convertEnvironmentIfNecessary(environment,
+                                                                                               deduceEnvironmentClass());
+    }
+    ConfigurationPropertySources.attach(environment);
+    return environment;
+}
+
+```
+
+
+
+#### 3.触发Environemnt对象prepare事件（重点）,其中包括application.properties文件的读取，和application-[activeprofile].properties/xml/yml/yaml文件的获取，加入environment的对象的ProperySource对象当中去.
+
+1. EventPublishListener.envionemntPrepared触发监听事件
+
+```java 
+void environmentPrepared(ConfigurableEnvironment environment) {
+		for (SpringApplicationRunListener listener : this.listeners) {
+			listener.environmentPrepared(environment);
+		}
+	}
+
+```
+
+
+
+2. 广播ApplicationEnvironmentPreparedEvent事件到其他对应的监听事件
+
+	```java 
+	public void environmentPrepared(ConfigurableEnvironment environment) {
+			this.initialMulticaster
+					.multicastEvent(new ApplicationEnvironmentPreparedEvent(this.application, this.args, environment));
+		}
+	```
+
+	
+
+3. 第一个监听器ConfiFileApplicationListener
+
+	```java 
+if (event instanceof ApplicationEnvironmentPreparedEvent) {
+	    onApplicationEnvironmentPreparedEvent((ApplicationEnvironmentPreparedEvent) event);
+}
+	//====================================================
+private void onApplicationEnvironmentPreparedEvent(ApplicationEnvironmentPreparedEvent event) {
+	    List<EnvironmentPostProcessor> postProcessors = loadPostProcessors();//从springfactory文件中加载EnvironmentPostProcessor有关类
+    postProcessors.add(this);//实例化好的posseeor类加入ConfigFile类中
+	    AnnotationAwareOrderComparator.sort(postProcessors);
+    for (EnvironmentPostProcessor postProcessor : postProcessors) {//遍历调用postProcessEnvir方法
+	        postProcessor.postProcessEnvironment(event.getEnvironment(), event.getSpringApplication());
+    }
+	}
+	```
+
+加载四个postProcess类，执行对应postProceessor方法
+	
+org.springframework.boot.cloud.CloudFoundryVcapEnvironmentPostProcessor,
+	
+
+
+
+org.springframework.boot.env.SpringApplicationJsonEnvironmentPostProcessor,\
+	
+跟Json PropertySource对象转换有关
+org.springframework.boot.env.SystemEnvironmentPropertySourceEnvironmentPostProcessor,
+
+
+
+
+
+用OriginAwareSystemEnvironmentPropertySource替代SystemEnviron对象
+
+org.springframework.boot.reactor.DebugAgentEnvironmentPostProcessor
+
+
+
+1. 添加RandomValuePropertySource.addToEnvironment(environment);//添加随机数生成类,解析${random.nextInt}这样的变量
+
+2. new Loader()载入实例化2个类，放入ConfigFileApplicationListener中
+
+	org.springframework.boot.env.PropertiesPropertySourceLoader, 方便解析xml,properties
+	org.springframework.boot.env.YamlPropertySourceLoader  方便解析yml,yaml	
+
+3. load方法
+
+4. FilteredPropertySource.apply()方法 获取application.properties/xml/yml/yaml配置文件，并且读取
+
+	spring.profile.ve属性
+
+
+
+
+
+```java 
+	//===========================================================
+	Loader(ConfigurableEnvironment environment, ResourceLoader resourceLoader) {
+				this.environment = environment;
+				this.placeholdersResolver = new PropertySourcesPlaceholdersResolver(this.environment);
+				this.resourceLoader = (resourceLoader != null) ? resourceLoader : new DefaultResourceLoader();
+				this.propertySourceLoaders = SpringFactoriesLoader.loadFactories(PropertySourceLoader.class,
+						getClass().getClassLoader());
+			}
+	//==================================================================
+	FilteredPropertySource.apply(this.environment, DEFAULT_PROPERTIES, LOAD_FILTERED_PROPERTY,
+						(defaultProperties) -> {
+						this.profiles = new LinkedList<>();
+							this.processedProfiles = new LinkedList<>();
+						this.activatedProfiles = false;
+							this.loaded = new LinkedHashMap<>();
+						initializeProfiles();
+							while (!this.profiles.isEmpty()) {
+								Profile profile = this.profiles.poll();
+								if (isDefaultProfile(profile)) {
+									addProfileToEnvironment(profile.getName());
+								}
+								load(profile, this::getPositiveProfileFilter,
+										addToLoaded(MutablePropertySources::addLast, false));
+								this.processedProfiles.add(profile);
+							}
+							load(null, this::getNegativeProfileFilter, addToLoaded(MutablePropertySources::addFirst, true));
+							addLoadedPropertySources();
+							applyActiveProfiles(defaultProperties);
+						});
+```
+
+
+
+
+
+
+​	
+​	
+
+#### 4.非常重要创建ConfigurableApplicationContext对象，并且填充ConfigurableApplicationContext的属性。prepareContext的作用
+
+1.  创建上下文对象，创建上下文两个中要的属性，其中reader会注册ConfigurationClassPostProcessor这个重要的类。它是注解实例化Bean的核心类，会再之后处理BeanFactoryPostProcessor中处理大量注解 包括@SpringBootApplication中的每一个注解
+2.  触发之前所有ApplicationInitalizer的initalize方法
+3.  触发contextPrepare事件，并且广播到对应的监听器上，触发监听事件.
+
+
+
+```java 
+public AnnotationConfigServletWebServerApplicationContext() {
+		//这里的构造方法会将一堆重要的内部的BeanPostProcessor类转化为BeanDefinition存入BeanFactory当中
+		this.reader = new AnnotatedBeanDefinitionReader(this);
+		//这里设置scanner，让applicationcontext可以扫描其他包
+		this.scanner = new ClassPathBeanDefinitionScanner(this);
+	}
+```
+
+
+
+
+
+```java 
+
+//创建上下文对象
+context = createApplicationContext();
+//设置异常报告期，也是从sping.factories文件中获取
+exceptionReporters = getSpringFactoriesInstances(SpringBootExceptionReporter.class,
+                                                 new Class[] { ConfigurableApplicationContext.class }, context);
+//重点方法，填充spring 上下文的属性
+prepareContext(context, environment, listeners, applicationArguments, printedBanner);
+```
+
+
+
+```java 
+//设置环境对象
+context.setEnvironment(environment);
+//做一些前置工作
+postProcessApplicationContext(context);
+//非常重要，触发所有ApplicationContextInitializer的initalize方法,，初始化了一些重要对象
+applyInitializers(context);
+```
+
+
+
+
+
+
+​	3.把启动类以注解的放入转化被BeanDefinition放入BeanDefiniationMap当中去,后续BeanFactoryProcessor获取
+
+	//把spring启动类放入sources 集合
+	Set<Object> sources = getAllSources();
+	Assert.notEmpty(sources, "Sources must not be empty");
+	//检测启动类是否被@Component修饰，并且转化为BeanDefination放入BeanDefinitionMap当中
+	load(context, sources.toArray(new Object[0]));
+	ConfigFileApplicationListener加入PropertySourceOrderingPostProcessor
+	}
+
+
+  4.   广播事件ApplicationPreparedEvent触发各类监听器
+
+	```java 
+	private void onApplicationPreparedEvent(ApplicationEvent event) {
+	    this.logger.switchTo(ConfigFileApplicationListener.class);
+	    addPostProcessors(((ApplicationPreparedEvent) event).getApplicationContext());
+	```
+
+
+
+### 5.spring的refresh()方法
+
+1. ConfigBeanPostProcessor这个BFPP会再invokeBeanFactoryProcessor方法中会处理之前加载的@SpringBootApplication产生的BD
+2. 因为它是一个组合注解，所以首先通过@ ComponentScan把当前包及其子包的其他注解修饰类全部解析成BD加载到BeanDefinitionMap中。
+3. 它又包含两个@Import注解而且value的值AutoConfigurationImportSelector，AutoConfigurationPackages.Registrar都是DeferedImportSelector的实现，会延迟导入。
+4. ConfigBeanPostProcess 会将所有@Import里的类全部加载，如果是实现了ImportSelector的话，那么就会调用它的selectImport方法返回一个字符串数组。接着会以这些字符串数组类作为参数再次递归调用processImport方法，直到Import里面的类为非ImportSelector,ImportSelectorRegitar的实现类。spring会将这些类转化为BD存入BeanDefinitionMap当中。当中如果又execlude的话，那么execlude 排除的类也不会加入BeanFactory当中去。
+5. springboot的AutoConfigurationImportSelector的selectImport方法把所有spring.factories文件当中的enconfiguration为键的值全部加载到内存，经过execlude 删选，最终把剩下的所有Bean转化为BD放入BeanDefinitionMap当中去。之后如果再spring容器创建Bean的过程，就会把所有BeanDefinitionMap的Bean实例化放入一级工厂当中。
+6. springboot的AutoConfigurationImportSelector.Registar 会把AutoConfiguration.class这个类也放入BeanDefinitionMap中
+7. springboot的@onConditional注解 value里面的类实现Conditional接口 shouldSkip方法，可以自定义条件，true就被加载到BD，false不会 。它还有拓展 @onConditionBean @OnConditaionClass 分别判断加载子类时，容器是否已经存在其他类的Bd或者根据是否可以加载指定类，来判断是否加载当前BD。
+
+
+
+
+
+## 6.Spring Tomcat整合
+
+1. ServletWebServerFactoryAutoConfiguration 会因为spring.factories把一堆配置类加载BeanDefinitionMap中
+
+2. SpringBoot 默认会装载TomcatWeb服务, 在Spring容器Refresh过程中, 通过onRefresh方法对TomcatServletWebServerFactory创建对象,  
+
+####a,webServer启动入口
+
+1. springboot 创建的上下文是ServletWebServerApplicationContext,它重写了AbstractApplicationContext的onRefresh()方法 里面用了createWebServer()方法 创建启动了Web服务器
+
+	```java 
+	//=================ServletWebServerApplicationContext================
+	@Override
+		protected void onRefresh() {
+			super.onRefresh();
+			try {
+				//springboot  创建tomcat web服务器方法
+				createWebServer();
+			}
+			catch (Throwable ex) {
+				throw new ApplicationContextException("Unable to start web server", ex);
+			}
+		}
+	```
+
+	
+
+#### b,创建webserverFactory
+
+```java 
+protected ServletWebServerFactory getWebServerFactory() {
+    // Use bean names so that we don't consider the hierarchy
+    String[] beanNames = getBeanFactory().getBeanNamesForType(ServletWebServerFactory.class);
+    if (beanNames.length == 0) {
+        throw new ApplicationContextException("Unable to start ServletWebServerApplicationContext due to missing "
+                                              + "ServletWebServerFactory bean.");
+    }
+    if (beanNames.length > 1) {
+        throw new ApplicationContextException("Unable to start ServletWebServerApplicationContext due to multiple "
+                                              + "ServletWebServerFactory beans : " + StringUtils.arrayToCommaDelimitedString(beanNames));
+    }
+    //注意，这里在springboot的自动装配Bean的过程中 已经将ServletWebServerFactory的相关类全部加载到BDMap当中了
+    //此时直接利用加载好的BD实例化相关对象
+    return getBeanFactory().getBean(beanNames[0], ServletWebServerFactory.class);
+}
+```
+
+
+
+#### c.TomcatServletWebServerFactory getWebServer创建tomcatServer
+
+```java 
+
+```
 
 
 

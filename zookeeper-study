@@ -1,8 +1,807 @@
-## 1.zookeeper是一个分布式协调服务
+#一、zookeeper基本介绍
+
+##1.zookeeper是一个分布式协调服务中间件
+
+
 
 ##2.zookeeper内部是一个类似文件树的结构。
 
 有根节点，子节点。并且每个节点内可以存储数据。但是不能超过1M。
+
+
+
+## 3.zookeeper节点的类型
+
+1.永久节点(默认)
+
+一旦创建,持久化到磁盘
+
+2.临时节点 create -e
+
+它的生命周期和创建它的session绑定。
+
+3.顺序节点  create -s
+
+它的创建,zookeeper会自动在名称后面添加一个自增id
+
+4.容器节点  create -c
+
+如果容器节点没有任何子节点，那么过了一段时间之后，此容器节点也会被删除
+
+5.TTL 节点 启动配置文件开启 才能创建 ，过了一段时间之后 自动删除
+
+
+
+## 4.zookeeper节点的属性
+
+1.创建的事务id  cZxid
+
+2.修改的事务id  mZxid
+
+3.最后删除或者添加的子节点事务id pZxid
+
+
+
+
+
+## 5.zookeeper监听机制
+
+ls -w 对目录变化 子节点变化 进行监听，有变化，服务端主动推动变化事件给客户端
+
+get -w  对节点的数据变化 进行监听，有变化，服务端主动推动变化事件给客户端
+
+**所有的监听都是一次性的，一旦触发，就会失效，如果要继续监听，需要继续-w 设置监听**
+
+
+
+## 6.zookeeper的权限管理 ACL
+
+1.配置文件 数zookeeper.skipACL=yes  可以跳过ACL验证
+
+2.addauth   digest   [用户名]:[密码]   创建用户密码     
+
+​    create  /node nodedata  auth:[用户名]:[密码]:[权限crwd] 
+
+之后访问这个节点的话，必须 addauth digest [用户名]:[密码]
+
+
+
+3.按ip来授权 setAcl /node‐ip ip:192.168.109.128:cdwra 2 create /node‐ip data ip:192.168.109.128:cdwra
+
+
+
+4.echo ‐n : | openssl dgst ‐binary ‐sha1 | openssl base64 
+
+节点创建的同时设置ACL create [-s] [-e] [-c] path [data] [acl] 1 create /zk‐node datatest digest:gj:X/NSthOB0fD/OT6iilJ55WJVado=:cdrwa 
+
+或者用setAcl 设置 1 setAcl /zk‐node digest:gj:X/NSthOB0fD/OT6iilJ55WJVado=:cdrwa
+
+访问前需要添加授权信息  addauth digest gj:test
+
+
+
+5.超级管理员模式
+
+DigestAuthenticationProvider中定义 2 ‐Dzookeeper.DigestAuthenticationProvider.superDigest=[用户名]:[密码]
+
+可以访问任意加了权限控制的节点
+
+
+
+## 7.zookeeper的内存数据
+
+DateTree =new ConcurrentHashMap<String,DataNode>()
+
+string为path   DataNode为节点信息
+
+
+
+DataNode 基本数据单位
+
+```java 
+ public class DataNode implements Record {
+2 byte data[];
+3 Long acl;
+4 public StatPersisted stat;
+5 private Set<String> children = null;
+```
+
+
+
+
+
+## 8.zookeeper持久化 文件 事务日志 快照SNAPSHOT
+
+1.zoo.cfg  里面的dataLogDir 的value 设置事务日志的存储路径，里面存放着所有的请求命令，包括创建会话。 log*
+
+采用预分配65MB  这样读写 顺序IO效率非常高.
+
+需要jar包转化才能读取
+
+2.snapshot文件 保存着zookeeper某一时刻的全量数据.可以用来恢复数据。 
+
+
+
+
+
+# 二、zookeeper的java客户端
+
+## 1.zookeeper client客户端的调用
+
+create 同步 异步
+
+getset
+
+del
+
+**如果需要监听需要，在每次获取数据之后 循环添加监听事件**
+
+
+
+## 2.netflix  curator 客户端的调用
+
+create 同步 异步
+
+getset
+
+del
+
+**可以递归创建节点**
+
+**不用循环添加监听事件**
+
+**可以使用线程池，异步回调处理任务**
+
+
+
+
+
+
+
+# 三、zookeeper集群
+
+## 1.集群角色
+
+a,leader 读写
+
+b,follwer 读 转发写请求  参与选举leader
+
+c,observer 读   不参与选举leader
+
+
+
+# 四、zookeeper使用场景
+
+### 1.分布式锁
+
+**非公平锁**
+
+create -e /lock  
+
+1.如果别一个session创建完成，其他session再创建会失败。其他session对这个节点进行watch监听。
+
+2.如果创建完成的session做好业务操作，关闭session时，其他session都会感知到，他们都会发起创建节点的请求。再次并发竞争，这就是典型的羊群效应。也是zookeeper非公平锁的实现.
+
+**公平锁**
+
+create -e -s /lockseq   watch上一个节点
+
+1.如果一个session创建完成，则会创建一个带有id的节点
+
+2.创建完成之后，判断是否id比自身小的节点，有的话对前一个进行监听。无的话，直接进行业务操作。
+
+3.如果能进行业务操作，完成之后。关闭会话，它的下一节点会感知到变化，从而获得锁。
+
+这样就避免了羊群效应。典型的公平锁。
+
+
+
+**共享锁**
+
+create -e -s /read-seq
+
+create -e -s /write-seq
+
+1.session的读，创建read顺序节点，如果之前有写节点的话，对写节点进行watch 监听。
+
+如果之前没有写节点的话，那么直接读。
+
+2.session写，创建write写节点，如果之前有写节点的话，对写节点进行watch监听。
+
+如果之前有读节点的话，对读节点进行watch监听
+
+如果之前没有写读节点的话，直接进行业务操作。
+
+
+
+### 2.注册中心
+
+zookeeper可以做微服务的注册中心
+
+1.每个服务把自己的实例名 ip 端口相关信息，注册到zookeeper的节点上面。
+
+2.调用方根据服务实例名到zookeeper查找对应的ip端口 url。调用方对zookeeper的服务实例节点进行监听。一旦zookeeper服务节点发生变化，那么调用方，能都立即感知到。 
+
+
+
+
+
+# zookeeper源码
+
+### 1. 入口
+
+org.apache.zookeeper.server.quorum.QuorumPeerMain 
+
+### 2.用NIO的方式，或者Netty方式启动server 对2181端口监听处理请求
+
+
+
+
+
+
+
+### 3.createElectionAlgorithm 开始选举 zookeeper现在都采用FastLeaderElection策略
+
+listener这里会start()异步线程 BIO的方式监听选举端口 fle message这里也会start 异步线程启动。
+
+start方法在这里做了两件事情。
+
+1.建立了ServerSocket  选举端口 死循环 accept连接。
+
+```java 
+QuorumCnxManager.Listener listener = qcm.listener;
+            if(listener != null){
+                listener.start();
+                FastLeaderElection fle = new FastLeaderElection(this, qcm);
+                fle.start();
+                le = fle;
+            } else {
+                LOG.error("Null listener when initializing cnx manager");
+            }
+            break;
+```
+
+
+
+2.如果my.id>s.id主动将自身当作客户端与s.id  建立连接。并且拒绝这样的s.id主动和自己建立连接
+
+ 如果my.id=s.id BUG 警告
+
+ 如果my.id<s.id 处理这样的连接发送过来的消息。
+
+```java 
+ private void handleConnection(Socket sock, DataInputStream din)
+            throws IOException {
+        Long sid = null, protocolVersion = null;
+        InetSocketAddress electionAddr = null;
+
+        try {
+            protocolVersion = din.readLong();
+            if (protocolVersion >= 0) { // this is a server id and not a protocol version
+                sid = protocolVersion;
+            } else {
+                try {
+                    InitialMessage init = InitialMessage.parse(protocolVersion, din);
+                    sid = init.sid;
+                    electionAddr = init.electionAddr;
+                } catch (InitialMessage.InitialMessageException ex) {
+                    LOG.error("Initial message parsing error!", ex);
+                    closeSocket(sock);
+                    return;
+                }
+            }
+
+            if (sid == QuorumPeer.OBSERVER_ID) {
+                /*
+                 * Choose identifier at random. We need a value to identify
+                 * the connection.
+                 */
+                sid = observerCounter.getAndDecrement();
+                LOG.info("Setting arbitrary identifier to observer: " + sid);
+            }
+        } catch (IOException e) {
+            LOG.warn("Exception reading or writing challenge: {}", e);
+            closeSocket(sock);
+            return;
+        }
+
+        // do authenticating learner
+        authServer.authenticate(sock, din);
+        //If wins the challenge, then close the new connection.
+        if (sid < self.getId()) {
+            /*
+             * This replica might still believe that the connection to sid is
+             * up, so we have to shut down the workers before trying to open a
+             * new connection.
+             */
+            SendWorker sw = senderWorkerMap.get(sid);
+            if (sw != null) {
+                sw.finish();
+            }
+
+            /*
+             * Now we start a new connection
+             */
+            LOG.debug("Create new connection to server: {}", sid);
+            closeSocket(sock);
+
+            if (electionAddr != null) {
+                connectOne(sid, electionAddr);
+            } else {
+                connectOne(sid);
+            }
+        } else if (sid == self.getId()) {
+            // we saw this case in ZOOKEEPER-2164
+            LOG.warn("We got a connection request from a server with our own ID. "
+                    + "This should be either a configuration error, or a bug.");
+        } else { // Otherwise start worker threads to receive data.
+            SendWorker sw = new SendWorker(sock, sid);
+            RecvWorker rw = new RecvWorker(sock, din, sid, sw);
+            sw.setRecv(rw);
+
+            SendWorker vsw = senderWorkerMap.get(sid);
+
+            if (vsw != null) {
+                vsw.finish();
+            }
+
+            senderWorkerMap.put(sid, sw);
+
+            queueSendMap.putIfAbsent(sid,
+                    new ArrayBlockingQueue<ByteBuffer>(SEND_CAPACITY));
+
+            sw.start();
+            rw.start();
+        }
+    }
+```
+
+
+
+ 如果my.id<s.id 处理这样的连接发送过来的消息。做了两件事情
+
+1.处理对应sid  队列中的选票任务，并且发给对方.
+
+```java 
+ public void run() {
+            threadCnt.incrementAndGet();
+            try {
+                /**
+                 * If there is nothing in the queue to send, then we
+                 * send the lastMessage to ensure that the last message
+                 * was received by the peer. The message could be dropped
+                 * in case self or the peer shutdown their connection
+                 * (and exit the thread) prior to reading/processing
+                 * the last message. Duplicate messages are handled correctly
+                 * by the peer.
+                 *
+                 * If the send queue is non-empty, then we have a recent
+                 * message than that stored in lastMessage. To avoid sending
+                 * stale message, we should send the message in the send queue.
+                 */
+                ArrayBlockingQueue<ByteBuffer> bq = queueSendMap.get(sid);
+                if (bq == null || isSendQueueEmpty(bq)) {
+                   ByteBuffer b = lastMessageSent.get(sid);
+                   if (b != null) {
+                       LOG.debug("Attempting to send lastMessage to sid=" + sid);
+                       send(b);
+                   }
+                }
+            } catch (IOException e) {
+                LOG.error("Failed to send last message. Shutting down thread.", e);
+                this.finish();
+            }
+            LOG.debug("SendWorker thread started towards {}. myId: {}", sid, QuorumCnxManager.this.mySid);
+            try {
+                while (running && !shutdown && sock != null) {
+
+                    ByteBuffer b = null;
+                    try {
+                        ArrayBlockingQueue<ByteBuffer> bq = queueSendMap
+                                .get(sid);
+                        if (bq != null) {
+                            b = pollSendQueue(bq, 1000, TimeUnit.MILLISECONDS);
+                        } else {
+                            LOG.error("No queue of incoming messages for " +
+                                      "server " + sid);
+                            break;
+                        }
+
+                        if(b != null){
+                            lastMessageSent.put(sid, b);
+                            send(b);
+                        }
+                    } catch (InterruptedException e) {
+                        LOG.warn("Interrupted while waiting for message on queue",
+                                e);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Exception when using channel: for id " + sid
+                         + " my id = " + QuorumCnxManager.this.mySid
+                         + " error = " + e);
+            }
+            this.finish();
+            LOG.warn("Send worker leaving thread " + " id " + sid + " my id = " + self.getId());
+        }
+    }
+```
+
+
+
+2.把不同sid 发送过来的消息放入对应的RecvQueue当中去
+
+```java 
+  public void run() {
+            threadCnt.incrementAndGet();
+            try {
+                LOG.debug("RecvWorker thread towards {} started. myId: {}", sid, QuorumCnxManager.this.mySid);
+                while (running && !shutdown && sock != null) {
+                    /**
+                     * Reads the first int to determine the length of the
+                     * message
+                     */
+                    int length = din.readInt();
+                    if (length <= 0 || length > PACKETMAXSIZE) {
+                        throw new IOException(
+                                "Received packet with invalid packet: "
+                                        + length);
+                    }
+                    /**
+                     * Allocates a new ByteBuffer to receive the message
+                     */
+                    byte[] msgArray = new byte[length];
+                    din.readFully(msgArray, 0, length);
+                    ByteBuffer message = ByteBuffer.wrap(msgArray);
+                    addToRecvQueue(new Message(message.duplicate(), sid));
+                }
+            } catch (Exception e) {
+                LOG.warn("Connection broken for id " + sid + ", my id = "
+                         + QuorumCnxManager.this.mySid + ", error = " , e);
+            } finally {
+                LOG.warn("Interrupting SendWorker thread from RecvWorker. sid: {}. myId: {}", sid, QuorumCnxManager.this.mySid);
+                sw.finish();
+                closeSocket(sock);
+            }
+        }
+    }
+```
+
+
+
+
+
+
+
+FastLeaderElection.start方法 会另启两条线程
+
+一个用于生成选票任务，并且按目标放入对应的队列当中。
+
+一个用户拿出选票任务，并且执行选举逻辑。
+
+```java 
+ void start(){
+            this.wsThread.start();
+            this.wrThread.start();
+        }
+```
+
+
+
+#### 开启异步线程生成选票
+
+从总的sendqueue队列中就获取自身选票
+
+```java 
+public void run() {
+                while (!stop) {
+                    try {
+                        ToSend m = sendqueue.poll(3000, TimeUnit.MILLISECONDS);
+                        if(m == null) continue;
+
+                        process(m);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+                LOG.info("WorkerSender is down");
+            }
+```
+
+process方法 发送目标是自身节点的选票，直接放入内存RecvQueue.否则放入把目标节点分为一个个队列分类存储，并且如果连接不存在的话，建立连接，存在的话，直接放入放入。真正从sendQueue取出，并且用BIO发送给目标节点，是在之前的listener.start里面的receiveConnection    my.id<s.id中处理的。
+
+```java 
+/**
+     * Processes invoke this message to queue a message to send. Currently,
+     * only leader election uses it.
+     * 将选票分类，发给自身的选票直接放入内存recvQueue,否则Bio Socket发送给别的节点
+     */
+    public void toSend(Long sid, ByteBuffer b) {
+        /*
+         * If sending message to myself, then simply enqueue it (loopback).
+         */
+        //发送给自身的选票，直接放入recvQueue
+        if (this.mySid == sid) {
+             b.position(0);
+             addToRecvQueue(new Message(b.duplicate(), sid));
+            /*
+             * Otherwise send to the corresponding thread to send.
+             */
+        } else {
+             /*
+              * Start a new connection if doesn't have one already.
+              */
+             ArrayBlockingQueue<ByteBuffer> bq = new ArrayBlockingQueue<ByteBuffer>(
+                SEND_CAPACITY);
+             ArrayBlockingQueue<ByteBuffer> oldq = queueSendMap.putIfAbsent(sid, bq);
+             //将每一台节点机器的任务分为一个sendqueue
+             if (oldq != null) {
+                 addToSendQueue(oldq, b);
+             } else {
+                 addToSendQueue(bq, b);
+             }
+             connectOne(sid);
+
+        }
+    }
+
+```
+
+
+
+
+
+
+
+
+
+### 4.super.start();开启异步线程，开始集群选举逻辑
+
+####1.QuoromPeer 的任务 死循环 while(RUNNING)
+
+##### 1.LOOKING 状态
+
+######1.创建自身选票，放入总的SendQuueue当中
+
+自身的myid   以及自身最长的一个zxid 作为currentVote对象
+
+```java 
+if (getPeerState() == ServerState.LOOKING) {
+    currentVote = new Vote(myid, getLastLoggedZxid(), getCurrentEpoch());
+}
+```
+
+
+
+把currentVote对象放入sendQueue总的队列当中，这里的选票任务会不断被处理发送任务线程取走处理，并且会按目标分类。
+
+```java 
+   try {
+                           reconfigFlagClear();
+                            if (shuttingDownLE) {
+                               shuttingDownLE = false;
+                               startLeaderElection();
+                               }
+                            setCurrentVote(makeLEStrategy().lookForLeader());
+                        } catch (Exception e) {
+                            LOG.warn("Unexpected exception", e);
+                            setPeerState(ServerState.LOOKING);
+                        }   
+```
+
+把自身的选票 发送给集群里的每一个节点
+
+```java 
+sendNotifications();
+//=========================================
+private void sendNotifications() {
+        for (long sid : self.getCurrentAndNextConfigVoters()) {
+            QuorumVerifier qv = self.getQuorumVerifier();
+            ToSend notmsg = new ToSend(ToSend.mType.notification,
+                    proposedLeader,
+                    proposedZxid,
+                    logicalclock.get(),
+                    ServerState.LOOKING,
+                    sid,
+                    proposedEpoch, qv.toString().getBytes());
+            if(LOG.isDebugEnabled()){
+                LOG.debug("Sending Notification: " + proposedLeader + " (n.leader), 0x"  +
+                      Long.toHexString(proposedZxid) + " (n.zxid), 0x" + Long.toHexString(logicalclock.get())  +
+                      " (n.round), " + sid + " (recipient), " + self.getId() +
+                      " (myid), 0x" + Long.toHexString(proposedEpoch) + " (n.peerEpoch)");
+            }
+            sendqueue.offer(notmsg);
+        }
+    }
+```
+
+
+
+
+
+
+
+
+
+###### 2.死循环 如果是LOOKING状态的话 不断从接收请求队列获取任务。
+
+```java 
+  while ((self.getPeerState() == ServerState.LOOKING) &&
+                    (!stop)){
+                /*
+                 * Remove next notification from queue, times out after 2 times
+                 * the termination time
+                 */
+                Notification n = recvqueue.poll(notTimeout,
+                        TimeUnit.MILLISECONDS);
+
+```
+
+
+
+如果选票周期，与自身节点选举周期相等的话，那么直接开始选举
+
+```java 
+else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
+                                proposedLeader, proposedZxid, proposedEpoch)) {
+                            updateProposal(n.leader, n.zxid, n.peerEpoch);
+                            sendNotifications();
+                        }
+```
+
+
+
+**<font color='yellow'>选票竞争的核心逻辑：如果zkid较大的话，则优先。如果zkid相同的话，再比较自身的myid.大的优先</font>**
+
+```java 
+ return ((newEpoch > curEpoch) ||
+                ((newEpoch == curEpoch) &&
+                ((newZxid > curZxid) || ((newZxid == curZxid) && (newId > curId)))));
+```
+
+
+
+
+
+选举成功之后，将选票放入一个HashMap reveSet .里面存放了所有竞争成功的选票。
+
+```java 
+  recvset.put(n.sid, new Vote(n.leader, n.zxid, n.electionEpoch, n.peerEpoch));
+```
+
+
+
+根据选票，看是否能根据半数以上的原则选出leader.
+
+```java 
+ if (termPredicate(recvset,
+                                new Vote(proposedLeader, proposedZxid,
+                                        logicalclock.get(), proposedEpoch))) {
+
+```
+
+
+
+循环判断
+
+```java 
+ while((n = recvqueue.poll(finalizeWait,
+                                    TimeUnit.MILLISECONDS)) != null){
+                                if(totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
+                                        proposedLeader, proposedZxid, proposedEpoch)){
+                                    recvqueue.put(n);
+                                    break;
+                                }
+```
+
+
+
+如果成功的话，并且选票选举的leader是本节点的话，修改本节点的状态，修改state为LEADING。否则为follower或则和 observer
+
+```java 
+ if (n == null) {
+                                self.setPeerState((proposedLeader == self.getId()) ?
+                                        ServerState.LEADING: learningState());
+                                Vote endVote = new Vote(proposedLeader,
+                                        proposedZxid, logicalclock.get(), 
+                                        proposedEpoch);
+                                leaveInstance(endVote);
+                                return endVote;
+                            }
+```
+
+
+
+
+
+##### 2.如果集群已经完成选举。新的节点刚加入集群的话，同样也会进入选举
+
+```java 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## 3.zookeeper主从复制模式，一个leader多个follower
 
