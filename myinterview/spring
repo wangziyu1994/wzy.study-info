@@ -1,0 +1,51 @@
+##### 1.spring bean的生命周期
+
+1.实例化 creatBeanInstance
+
+2.填充属性 applyPropertyValue
+
+3.初始化
+
+​    3.1 对于一些继承aware接口的执行
+
+​    3.2 BPP的  postBeforeInitization  包括 init-method（@PostConstructor）的执行
+
+   3.3  IntizationBean  afterPropertiesSet执行
+
+​    3.4 BPP的 postAfterInitization (动态代理)
+
+​    3.5  容器关闭 destroy  Bean    destroy-method （@PreDestroy）方法执行
+
+
+
+
+
+#### 2.spring事务的传播行为
+
+require
+
+复用外部事务，不存在创建一个新的事务
+
+requireNew 
+
+不用外部事务，自己创建一个的事务
+
+nest
+
+复用外部事务，不存在创建一个新的事务。回滚 内部事务单独回滚的savePoint
+
+mantory 
+
+使用外部事务，不存在抛出异常
+
+never
+
+不使用外部事务，存在的话，抛出异常
+
+support
+
+复用外部事务，不存在的话，以非事务的方式运行
+
+not support
+
+不复用外部事务，存在的话，也以非事务的方式运行。

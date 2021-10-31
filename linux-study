@@ -273,13 +273,18 @@ recv 不阻塞，没有内核直接返回0
 缺点：
 
 1. 客户端的每一个连接，用户都需要accept拿到连接的文件描述符，jvm用户需要保存之前已经拿到的文件描述符信息，每一次都是一个用户态进行系统调用切换内核态。线程上下文切换成本很高。
+
 2. 每次文件描述符的信息，都需要从内核的内存空间，复制到用户的内存空间。数据需要拷贝。如果很多的话，会占用很多时间.时间复杂度是O（n)
+
+3. 每次处理有read事件的Socket时，都需要遍历所有已经accept的连接。其中会有大量没有发生read事件的Socket，因此产生效率低下。
+
+	
 
 
 
 ### 4.linux  java  多路复用 socket 
 
-#### 1.selector,poll(需要配置JVM启动参数：)
+#### 1.select,poll(需要配置JVM启动参数：)
 
 1. selector 用户进行select调用。将所有监听的文件描述符，复制到内核。内核对所有的文件描述符进行一个一个的遍历。如果存在，将有数据或者新的连接复制到用户进程。如果不存在，睡眠用户进程。一旦有数据或者连接的到来，唤醒用户进程，并且将所有的文件描述符复制到用户进程。
 
@@ -297,9 +302,35 @@ recv 不阻塞，没有内核直接返回0
 
 #### 2.epoll
 
-1. 用户进程注册要绑定的事件 epoll.create().
-2. 用户进程在内核开辟一块共享内存。内核维护一个红黑树。用户维护一个链表。epoll.ctl(),用户进程首次把所有要监听的文件描述符，传给内核。
-3. 如果有数据到来的话，内核直接将数据或者新的连接，拿到使用callback，传入共享内存的红黑树当中，并且用户可以通过共享内存的链表拿到。用户调用epoll.wait().直接可以获取到有数据或者新连接的文件描述符。并且复制数据通过mmap函数的方式。
+·1.用户进程 epoll.create().在内核创建一个epoll实例,---------->JAVA  selector.open()
+
+用户进程在内核开辟一块共享内存。内核维护一个红黑树。用户维护一个链表。
+
+![img](D:\gitResposity-info\wzy.study-info\images\20190518113809289.png)
+
+
+
+
+
+
+
+
+
+2.JAVA selector.register(socket) 把监听的文件描述符传入自己内部的集合当中去 pollWrapper.add(fd)
+
+
+
+3.用户进程epoll.ctl().把监听的socket添加到epoll实例的红黑树节点当中去------------------> JAVA selector.select()
+
+所有添加到epoll中的事件都会与设备(网卡)驱动程序建立回调关系，也就是说，当相应的事件发生(<font color='yellow'>网卡有数据到来触发CPU的硬中断</font>)时会调用这个回调方法。这个回调方法在内核中叫ep_poll_callback,它会将发生的事件添加到rdlist双链表中。
+
+
+
+4.用户调用epoll.wait(),可以通过共享内存的链表拿到有数据文件描述符。------->JAVA  selector.select()
+
+
+
+
 
 
 
@@ -419,9 +450,1345 @@ java 中的selector
 
 
 
+## A.Netty  EventLoop流程
+
+1.每个EventLoop都有一个selector.而Boss的都selector上注册了accept事件。不断接收客户端的socket连接。
+
+2.接收之后。把这些socket 注册到其他worker EventLoop的selector上。
+
+3.worker的EventLoop 处理队列中的任务。任务如下：
+
+​    a.轮询让自己的selector注册read和write事件。
+
+​    b.如果捕捉到事件,一层层经过自己pipe中的众多handler执行。
 
 
 
+
+
+## B.Netty心跳机制
+
+心跳就是维持TCP的长连接，客户端向服务端定时发特殊的数据包，通知对方，自己仍然存活。以确保TCP的有效性。
+
+
+
+**源码实现**
+
+1.Netty 自带的IdleStateHandler  在pipe中会被调用。如果socker发生read事件，那么此handler会最先被调用。
+
+```java 
+
+ public IdleStateHandler(
+            long readerIdleTime, long writerIdleTime, long allIdleTime,
+            TimeUnit unit) {
+        this(false, readerIdleTime, writerIdleTime, allIdleTime, unit);
+    }
+//=====================================
+public IdleStateHandler(boolean observeOutput,
+            long readerIdleTime, long writerIdleTime, long allIdleTime,
+            TimeUnit unit) {
+        ObjectUtil.checkNotNull(unit, "unit");
+
+        this.observeOutput = observeOutput;
+
+        if (readerIdleTime <= 0) {
+            readerIdleTimeNanos = 0;
+        } else {
+            readerIdleTimeNanos = Math.max(unit.toNanos(readerIdleTime), MIN_TIMEOUT_NANOS);
+        }
+        if (writerIdleTime <= 0) {
+            writerIdleTimeNanos = 0;
+        } else {
+            writerIdleTimeNanos = Math.max(unit.toNanos(writerIdleTime), MIN_TIMEOUT_NANOS);
+        }
+        if (allIdleTime <= 0) {
+            allIdleTimeNanos = 0;
+        } else {
+            allIdleTimeNanos = Math.max(unit.toNanos(allIdleTime), MIN_TIMEOUT_NANOS);
+        }
+    }
+```
+
+
+
+
+
+
+
+2.IdleStateHandler 初始化工作
+
+初始化过程，在指定延时时间后执行 ReaderIdleTimeoutTask里面的任务
+
+```java 
+ @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        // This method will be invoked only if this handler was added
+        // before channelActive() event is fired.  If a user adds this handler
+        // after the channelActive() event, initialize() will be called by beforeAdd().
+        initialize(ctx);
+        super.channelActive(ctx);
+    }
+//======================================================
+    private void initialize(ChannelHandlerContext ctx) {
+        // Avoid the case where destroy() is called before scheduling timeouts.
+        // See: https://github.com/netty/netty/issues/143
+        switch (state) {
+        case 1:
+        case 2:
+            return;
+        }
+
+        state = 1;
+        initOutputChanged(ctx);
+
+        lastReadTime = lastWriteTime = ticksInNanos();
+        if (readerIdleTimeNanos > 0) {
+            readerIdleTimeout = schedule(ctx, new ReaderIdleTimeoutTask(ctx),
+                    readerIdleTimeNanos, TimeUnit.NANOSECONDS);
+        }
+        if (writerIdleTimeNanos > 0) {
+            writerIdleTimeout = schedule(ctx, new WriterIdleTimeoutTask(ctx),
+                    writerIdleTimeNanos, TimeUnit.NANOSECONDS);
+        }
+        if (allIdleTimeNanos > 0) {
+            allIdleTimeout = schedule(ctx, new AllIdleTimeoutTask(ctx),
+                    allIdleTimeNanos, TimeUnit.NANOSECONDS);
+        }
+    }
+
+//==========================================================================
+```
+
+
+
+
+
+
+
+3.ReaderIdleTimeoutTask任务的具体内容 ：获取指定的心跳超时时间，判断自动上次读取到现在是否超时了。
+
+如果超时了的话，在上下文对象中传入超时事件,。触发下一handler的usedEventTigger方法
+
+如果没有继续在指定时间之后调用此任务。继续下一handler
+
+```java 
+ protected void run(ChannelHandlerContext ctx) {
+            long nextDelay = readerIdleTimeNanos;
+            if (!reading) {
+                nextDelay -= ticksInNanos() - lastReadTime;
+            }
+
+            if (nextDelay <= 0) {
+                // Reader is idle - set a new timeout and notify the callback.
+                readerIdleTimeout = schedule(ctx, this, readerIdleTimeNanos, TimeUnit.NANOSECONDS);
+
+                boolean first = firstReaderIdleEvent;
+                firstReaderIdleEvent = false;
+
+                try {
+                    IdleStateEvent event = newIdleStateEvent(IdleState.READER_IDLE, first);
+                    channelIdle(ctx, event);
+                } catch (Throwable t) {
+                    ctx.fireExceptionCaught(t);
+                }
+            } else {
+                // Read occurred before the timeout - set a new timeout with shorter delay.
+                readerIdleTimeout = schedule(ctx, this, nextDelay, TimeUnit.NANOSECONDS);
+            }
+        }
+```
+
+
+
+4.下一handler 判断具体是什么超时事件。对应进行业务处理。
+
+```java 
+ public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+18 IdleStateEvent event = (IdleStateEvent) evt;
+19
+20 String eventType = null;
+21 switch (event.state()) {
+22 case READER_IDLE:
+23 eventType = "读空闲";
+24 readIdleTimes++; // 读空闲的计数加1
+25 break;
+26 case WRITER_IDLE:
+27 eventType = "写空闲";
+28 // 不处理
+29 break;
+30 case ALL_IDLE:
+31 eventType = "读写空闲";
+32 // 不处理
+33 break;
+34 }
+
+```
+
+
+
+
+
+
+
+## C.Netty源码
+
+### 1.链式调用准备动作.
+
+首先创建EventLoopGroup  EventLoopGoup里面有EventLoop.
+
+EventLoop里面有selector  Thread对象
+
+```java 
+ NioEventLoop(NioEventLoopGroup parent, Executor executor, SelectorProvider selectorProvider,
+                 SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler,
+                 EventLoopTaskQueueFactory queueFactory) {
+        super(parent, executor, false, newTaskQueue(queueFactory), newTaskQueue(queueFactory),
+                rejectedExecutionHandler);
+        this.provider = ObjectUtil.checkNotNull(selectorProvider, "selectorProvider");
+        this.selectStrategy = ObjectUtil.checkNotNull(strategy, "selectStrategy");
+        final SelectorTuple selectorTuple = openSelector();
+        this.selector = selectorTuple.selector;
+        this.unwrappedSelector = selectorTuple.unwrappedSelector;
+    }
+```
+
+
+
+之后给EventLoopGroup的属性赋值，包括
+
+1.boss的EventLoopGroup   worker的EventLoopGroup
+
+2.NioEventLoopGroup 会带入线程工厂参数给自己的executor属性创建一个ThreadPerlExecutor对象，它的execute方法是通过线程工厂创建线程执行创建进来的Runnable 任务
+
+2.NioSockerChannel的Constructor对象。
+
+3.创建PipeLine对象
+
+
+
+### 2.Boss  bind 监听端口
+
+
+
+```java 
+  public ChannelFuture bind(SocketAddress localAddress) {
+        validate();
+        if (localAddress == null) {
+            throw new NullPointerException("localAddress");
+        }
+        return doBind(localAddress);
+    }
+```
+
+
+
+
+
+#### 1.initAndRegisry()  new Channel()方法
+
+1.调用Netty 自己的NioSocketChannel 的构造方法，创建NioServerChannel 初始化一个Selector 
+
+2.将accept事件注册到Selector上
+
+3.初始化一个pipeline 存放HeaderContext TailContext节点
+
+```java 
+  public NioServerSocketChannel() {
+        this(DEFAULT_SELECTOR_PROVIDER);
+    }
+//===========NioServerSocketChannel==========================================
+  public NioServerSocketChannel(ServerSocketChannel channel) {
+        super(null, channel, SelectionKey.OP_ACCEPT);
+        config = new NioServerSocketChannelConfig(this, javaChannel().socket());
+    }
+//============NioServerSocketChannel==============================================
+   protected AbstractNioMessageChannel(Channel parent, SelectableChannel ch, int readInterestOp) {
+        super(parent, ch, readInterestOp);
+    }
+//===============================================================
+    protected AbstractNioChannel(Channel parent, SelectableChannel ch, int readInterestOp) {
+        super(parent);
+        this.ch = ch;
+        this.readInterestOp = readInterestOp;
+        try {
+            ch.configureBlocking(false);
+        } catch (IOException e) {
+            try {
+                ch.close();
+            } catch (IOException e2) {
+                logger.warn(
+                            "Failed to close a partially initialized socket.", e2);
+            }
+
+            throw new ChannelException("Failed to enter non-blocking mode.", e);
+        }
+    }
+//====================AbstractChannel===================================================
+protected AbstractChannel(Channel parent) {
+        this.parent = parent;
+        id = newId();
+        unsafe = newUnsafe();
+        pipeline = newChannelPipeline();
+    }
+//=====================NioServerSocketChannelConfig============================================
+ private NioServerSocketChannelConfig(NioServerSocketChannel channel, ServerSocket javaSocket) {
+            super(channel, javaSocket);
+        }
+//=================DefaultChannelConfig======================================
+protected DefaultChannelConfig(Channel channel, RecvByteBufAllocator allocator) {
+        setRecvByteBufAllocator(allocator, channel.metadata());
+        this.channel = channel;
+    }
+
+```
+
+
+
+#### 2.initAndRegistry init 方法
+
+创建ChannelInitializer，放入当前EventLoopGroup的 PipeLine中
+
+    void init(Channel channel) throws Exception {
+        final Map<ChannelOption<?>, Object> options = options0();
+        synchronized (options) {
+            setChannelOptions(channel, options, logger);
+        }
+    
+        final Map<AttributeKey<?>, Object> attrs = attrs0();
+        synchronized (attrs) {
+            for (Entry<AttributeKey<?>, Object> e: attrs.entrySet()) {
+                @SuppressWarnings("unchecked")
+                AttributeKey<Object> key = (AttributeKey<Object>) e.getKey();
+                channel.attr(key).set(e.getValue());
+            }
+        }
+    
+        ChannelPipeline p = channel.pipeline();
+    
+        final EventLoopGroup currentChildGroup = childGroup;
+        final ChannelHandler currentChildHandler = childHandler;
+        final Entry<ChannelOption<?>, Object>[] currentChildOptions;
+        final Entry<AttributeKey<?>, Object>[] currentChildAttrs;
+        synchronized (childOptions) {
+            currentChildOptions = childOptions.entrySet().toArray(newOptionArray(0));
+        }
+        synchronized (childAttrs) {
+            currentChildAttrs = childAttrs.entrySet().toArray(newAttrArray(0));
+        }
+    
+        p.addLast(new ChannelInitializer<Channel>() {
+            @Override
+            public void initChannel(final Channel ch) throws Exception {
+                final ChannelPipeline pipeline = ch.pipeline();
+                ChannelHandler handler = config.handler();
+                if (handler != null) {
+                    pipeline.addLast(handler);
+                }
+    
+                ch.eventLoop().execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        pipeline.addLast(new ServerBootstrapAcceptor(
+                                ch, currentChildGroup, currentChildHandler, currentChildOptions, currentChildAttrs));
+                    }
+                });
+            }
+        });
+    }
+
+
+
+
+
+#### 3.initAndRegistry registry方法
+
+ 创建DefaultChannelPromise对象。并把当前EventLoopGroup传入到它的executor属性当中
+
+```java 
+  ChannelFuture regFuture = config().group().register(channel);
+//===============AbstractBootStrapConfig=================================================
+  public final EventLoopGroup group() {
+        return bootstrap.group();
+    }
+//=================MultithreadEventLoopGroup=========================
+public ChannelFuture register(Channel channel) {
+        return next().register(channel);
+    }
+
+//===================SingleThreadEventLoop========================
+  public ChannelFuture register(Channel channel) {
+        return register(new DefaultChannelPromise(channel, this));
+    }
+//====================DefaultChannelPromise======================
+  public DefaultChannelPromise(Channel channel, EventExecutor executor) {
+        super(executor);
+        this.channel = checkNotNull(channel, "channel");
+    }
+
+```
+
+
+
+#### 4.SingleThreadEventLoop registry(channel)方法
+
+1.传入registry0()  Runnable 到TaskQueue当中去
+
+2.startThread() 异步线程执行任务 
+
+
+
+#####a.添加registry0任务。开启异步线程
+
+里面 dostartThread里面拿到当前NioEventLoopGroup的executor,执行任务。
+
+```JAVA 
+public ChannelFuture register(Channel channel) {
+        return register(new DefaultChannelPromise(channel, this));
+    }
+//=================SingleThreadEventLoop ================================
+ public ChannelFuture register(final ChannelPromise promise) {
+        ObjectUtil.checkNotNull(promise, "promise");
+        promise.channel().unsafe().register(this, promise);
+        return promise;
+    }
+//=================SingleThreadEventLoop =========================
+ public final void register(EventLoop eventLoop, final ChannelPromise promise) {
+            ObjectUtil.checkNotNull(eventLoop, "eventLoop");
+            if (isRegistered()) {
+                promise.setFailure(new IllegalStateException("registered to an event loop already"));
+                return;
+            }
+            if (!isCompatible(eventLoop)) {
+                promise.setFailure(
+                        new IllegalStateException("incompatible event loop type: " + eventLoop.getClass().getName()));
+                return;
+            }
+
+            AbstractChannel.this.eventLoop = eventLoop;
+
+            if (eventLoop.inEventLoop()) {
+                register0(promise);
+            } else {
+                try {
+                    eventLoop.execute(new Runnable() {
+                        @Override
+                        public void run() {
+                            register0(promise);
+                        }
+                    });
+                } catch (Throwable t) {
+                    logger.warn(
+                            "Force-closing a channel whose registration task was not accepted by an event loop: {}",
+                            AbstractChannel.this, t);
+                    closeForcibly();
+                    closeFuture.setClosed();
+                    safeSetFailure(promise, t);
+                }
+            }
+        }
+//==================SingleThreadEventExecutor ===================================
+ public void execute(Runnable task) {
+        ObjectUtil.checkNotNull(task, "task");
+        execute(task, !(task instanceof LazyRunnable) && wakesUpForTask(task));
+    }
+//==================SingleThreadEventExecutor ============================
+private void execute(Runnable task, boolean immediate) {
+        boolean inEventLoop = inEventLoop();
+        addTask(task);
+        if (!inEventLoop) {
+            startThread();
+            if (isShutdown()) {
+                boolean reject = false;
+                try {
+                    if (removeTask(task)) {
+                        reject = true;
+                    }
+                } catch (UnsupportedOperationException e) {
+                    // The task queue does not support removal so the best thing we can do is to just move on and
+                    // hope we will be able to pick-up the task before its completely terminated.
+                    // In worst case we will log on termination.
+                }
+                if (reject) {
+                    reject();
+                }
+            }
+        }
+
+        if (!addTaskWakesUp && immediate) {
+            wakeup(inEventLoop);
+        }
+    }
+//====================SingleThreadEventExecutor===========================
+ private void startThread() {
+        if (state == ST_NOT_STARTED) {
+            if (STATE_UPDATER.compareAndSet(this, ST_NOT_STARTED, ST_STARTED)) {
+                boolean success = false;
+                try {
+                    doStartThread();
+                    success = true;
+                } finally {
+                    if (!success) {
+                        STATE_UPDATER.compareAndSet(this, ST_STARTED, ST_NOT_STARTED);
+                    }
+                }
+            }
+        }
+    }
+//==================SingleThreadEventExecutor==================================
+ private void doStartThread() {
+        assert thread == null;
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                thread = Thread.currentThread();
+                if (interrupted) {
+                    thread.interrupt();
+                }
+
+                boolean success = false;
+                updateLastExecutionTime();
+                try {
+                    SingleThreadEventExecutor.this.run();
+                    success = true;
+                } catch (Throwable t) {
+                    logger.warn("Unexpected exception from an event executor: ", t);
+                } finally {
+                    for (;;) {
+                        int oldState = state;
+                        if (oldState >= ST_SHUTTING_DOWN || STATE_UPDATER.compareAndSet(
+                                SingleThreadEventExecutor.this, oldState, ST_SHUTTING_DOWN)) {
+                            break;
+                        }
+                    }
+
+                    // Check if confirmShutdown() was called at the end of the loop.
+                    if (success && gracefulShutdownStartTime == 0) {
+                        if (logger.isErrorEnabled()) {
+                            logger.error("Buggy " + EventExecutor.class.getSimpleName() + " implementation; " +
+                                    SingleThreadEventExecutor.class.getSimpleName() + ".confirmShutdown() must " +
+                                    "be called before run() implementation terminates.");
+                        }
+                    }
+
+                    try {
+                        // Run all remaining tasks and shutdown hooks. At this point the event loop
+                        // is in ST_SHUTTING_DOWN state still accepting tasks which is needed for
+                        // graceful shutdown with quietPeriod.
+                        for (;;) {
+                            if (confirmShutdown()) {
+                                break;
+                            }
+                        }
+
+                        // Now we want to make sure no more tasks can be added from this point. This is
+                        // achieved by switching the state. Any new tasks beyond this point will be rejected.
+                        for (;;) {
+                            int oldState = state;
+                            if (oldState >= ST_SHUTDOWN || STATE_UPDATER.compareAndSet(
+                                    SingleThreadEventExecutor.this, oldState, ST_SHUTDOWN)) {
+                                break;
+                            }
+                        }
+
+                        // We have the final set of tasks in the queue now, no more can be added, run all remaining.
+                        // No need to loop here, this is the final pass.
+                        confirmShutdown();
+                    } finally {
+                        try {
+                            cleanup();
+                        } finally {
+                            // Lets remove all FastThreadLocals for the Thread as we are about to terminate and notify
+                            // the future. The user may block on the future and once it unblocks the JVM may terminate
+                            // and start unloading classes.
+                            // See https://github.com/netty/netty/issues/6596.
+                            FastThreadLocal.removeAll();
+
+                            STATE_UPDATER.set(SingleThreadEventExecutor.this, ST_TERMINATED);
+                            threadLock.countDown();
+                            int numUserTasks = drainTasks();
+                            if (numUserTasks > 0 && logger.isWarnEnabled()) {
+                                logger.warn("An event executor terminated with " +
+                                        "non-empty task queue (" + numUserTasks + ')');
+                            }
+                            terminationFuture.setSuccess(null);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+```
+
+
+
+##### b.doStartThread()方法  SingleThreadEventExecutor.this.run()处理逻辑
+
+循环，selector.select(timeout)
+
+```java 
+ protected void run() {
+        for (;;) {
+            try {
+                try {
+                    switch (selectStrategy.calculateStrategy(selectNowSupplier, hasTasks())) {
+                    case SelectStrategy.CONTINUE:
+                        continue;
+
+                    case SelectStrategy.BUSY_WAIT:
+                        // fall-through to SELECT since the busy-wait is not supported with NIO
+
+                    case SelectStrategy.SELECT:
+                        select(wakenUp.getAndSet(false));
+
+                        // 'wakenUp.compareAndSet(false, true)' is always evaluated
+                        // before calling 'selector.wakeup()' to reduce the wake-up
+                        // overhead. (Selector.wakeup() is an expensive operation.)
+                        //
+                        // However, there is a race condition in this approach.
+                        // The race condition is triggered when 'wakenUp' is set to
+                        // true too early.
+                        //
+                        // 'wakenUp' is set to true too early if:
+                        // 1) Selector is waken up between 'wakenUp.set(false)' and
+                        //    'selector.select(...)'. (BAD)
+                        // 2) Selector is waken up between 'selector.select(...)' and
+                        //    'if (wakenUp.get()) { ... }'. (OK)
+                        //
+                        // In the first case, 'wakenUp' is set to true and the
+                        // following 'selector.select(...)' will wake up immediately.
+                        // Until 'wakenUp' is set to false again in the next round,
+                        // 'wakenUp.compareAndSet(false, true)' will fail, and therefore
+                        // any attempt to wake up the Selector will fail, too, causing
+                        // the following 'selector.select(...)' call to block
+                        // unnecessarily.
+                        //
+                        // To fix this problem, we wake up the selector again if wakenUp
+                        // is true immediately after selector.select(...).
+                        // It is inefficient in that it wakes up the selector for both
+                        // the first case (BAD - wake-up required) and the second case
+                        // (OK - no wake-up required).
+
+                        if (wakenUp.get()) {
+                            selector.wakeup();
+                        }
+                        // fall through
+                    default:
+                    }
+                } catch (IOException e) {
+                    // If we receive an IOException here its because the Selector is messed up. Let's rebuild
+                    // the selector and retry. https://github.com/netty/netty/issues/8566
+                    rebuildSelector0();
+                    handleLoopException(e);
+                    continue;
+                }
+
+                cancelledKeys = 0;
+                needsToSelectAgain = false;
+                final int ioRatio = this.ioRatio;
+                if (ioRatio == 100) {
+                    try {
+                        processSelectedKeys();
+                    } finally {
+                        // Ensure we always run tasks.
+                        runAllTasks();
+                    }
+                } else {
+                    final long ioStartTime = System.nanoTime();
+                    try {
+                        processSelectedKeys();
+                    } finally {
+                        // Ensure we always run tasks.
+                        final long ioTime = System.nanoTime() - ioStartTime;
+                        runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
+                    }
+                }
+            } catch (Throwable t) {
+                handleLoopException(t);
+            }
+            // Always handle shutdown even if the loop processing threw an exception.
+            try {
+                if (isShuttingDown()) {
+                    closeAll();
+                    if (confirmShutdown()) {
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                handleLoopException(t);
+            }
+        }
+    }
+
+//========================================================================
+    private void select(boolean oldWakenUp) throws IOException {
+        Selector selector = this.selector;
+        try {
+            int selectCnt = 0;
+            long currentTimeNanos = System.nanoTime();
+            long selectDeadLineNanos = currentTimeNanos + delayNanos(currentTimeNanos);
+
+            for (;;) {
+                long timeoutMillis = (selectDeadLineNanos - currentTimeNanos + 500000L) / 1000000L;
+                if (timeoutMillis <= 0) {
+                    if (selectCnt == 0) {
+                        selector.selectNow();
+                        selectCnt = 1;
+                    }
+                    break;
+                }
+
+                // If a task was submitted when wakenUp value was true, the task didn't get a chance to call
+                // Selector#wakeup. So we need to check task queue again before executing select operation.
+                // If we don't, the task might be pended until select operation was timed out.
+                // It might be pended until idle timeout if IdleStateHandler existed in pipeline.
+                if (hasTasks() && wakenUp.compareAndSet(false, true)) {
+                    selector.selectNow();
+                    selectCnt = 1;
+                    break;
+                }
+
+                int selectedKeys = selector.select(timeoutMillis);
+                selectCnt ++;
+
+                if (selectedKeys != 0 || oldWakenUp || wakenUp.get() || hasTasks() || hasScheduledTasks()) {
+                    // - Selected something,
+                    // - waken up by user, or
+                    // - the task queue has a pending task.
+                    // - a scheduled task is ready for processing
+                    break;
+                }
+                if (Thread.interrupted()) {
+                    // Thread was interrupted so reset selected keys and break so we not run into a busy loop.
+                    // As this is most likely a bug in the handler of the user or it's client library we will
+                    // also log it.
+                    //
+                    // See https://github.com/netty/netty/issues/2426
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Selector.select() returned prematurely because " +
+                                "Thread.currentThread().interrupt() was called. Use " +
+                                "NioEventLoop.shutdownGracefully() to shutdown the NioEventLoop.");
+                    }
+                    selectCnt = 1;
+                    break;
+                }
+
+                long time = System.nanoTime();
+                if (time - TimeUnit.MILLISECONDS.toNanos(timeoutMillis) >= currentTimeNanos) {
+                    // timeoutMillis elapsed without anything selected.
+                    selectCnt = 1;
+                } else if (SELECTOR_AUTO_REBUILD_THRESHOLD > 0 &&
+                        selectCnt >= SELECTOR_AUTO_REBUILD_THRESHOLD) {
+                    // The code exists in an extra method to ensure the method is not too big to inline as this
+                    // branch is not very likely to get hit very frequently.
+                    selector = selectRebuildSelector(selectCnt);
+                    selectCnt = 1;
+                    break;
+                }
+
+                currentTimeNanos = time;
+            }
+
+            if (selectCnt > MIN_PREMATURE_SELECTOR_RETURNS) {
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Selector.select() returned prematurely {} times in a row for Selector {}.",
+                            selectCnt - 1, selector);
+                }
+            }
+        } catch (CancelledKeyException e) {
+            if (logger.isDebugEnabled()) {
+                logger.debug(CancelledKeyException.class.getSimpleName() + " raised by a Selector {} - JDK bug?",
+                        selector, e);
+            }
+            // Harmless exception - log anyway
+        }
+    }
+```
+
+
+
+
+
+##### c.循环调用selector.select获取发生的selectedKey,  processSelectedKey(k,a)
+
+如果发生了accept或者read事件，那么进入unsafe.read方法.
+
+accept,read对应不同的事件
+
+
+
+
+
+
+
+
+
+如果没有的话两者都会进入finally块当中的runAllTask方法
+
+```java 
+ finally {
+                        // Ensure we always run tasks.
+                        final long ioTime = System.nanoTime() - ioStartTime;
+                        runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
+                    }
+//============================================================
+ protected boolean runAllTasks(long timeoutNanos) {
+        fetchFromScheduledTaskQueue();
+        Runnable task = pollTask();
+        if (task == null) {
+            afterRunningAllTasks();
+            return false;
+        }
+
+        final long deadline = ScheduledFutureTask.nanoTime() + timeoutNanos;
+        long runTasks = 0;
+        long lastExecutionTime;
+        for (;;) {
+            safeExecute(task);
+
+            runTasks ++;
+
+            // Check timeout every 64 tasks because nanoTime() is relatively expensive.
+            // XXX: Hard-coded value - will make it configurable if it is really a problem.
+            if ((runTasks & 0x3F) == 0) {
+                lastExecutionTime = ScheduledFutureTask.nanoTime();
+                if (lastExecutionTime >= deadline) {
+                    break;
+                }
+            }
+
+            task = pollTask();
+            if (task == null) {
+                lastExecutionTime = ScheduledFutureTask.nanoTime();
+                break;
+            }
+        }
+
+        afterRunningAllTasks();
+        this.lastExecutionTime = lastExecutionTime;
+        return true;
+    }
+//======================================================
+ protected static void safeExecute(Runnable task) {
+        try {
+            task.run();
+        } catch (Throwable t) {
+            logger.warn("A task raised an exception. Task: {}", task, t);
+        }
+    }
+```
+
+
+
+
+
+#####d.runAllTask方法 循环获取当前EventLoopGroup的TaskQueue里的任务
+
+```java 
+    protected boolean runAllTasks() {
+        assert inEventLoop();
+        boolean fetchedAll;
+        boolean ranAtLeastOne = false;
+
+        do {
+            fetchedAll = fetchFromScheduledTaskQueue();
+            if (runAllTasksFrom(taskQueue)) {
+                ranAtLeastOne = true;
+            }
+        } while (!fetchedAll); // keep on processing until we fetched all scheduled tasks.
+
+        if (ranAtLeastOne) {
+            lastExecutionTime = ScheduledFutureTask.nanoTime();
+        }
+        afterRunningAllTasks();
+        return ranAtLeastOne;
+    }
+//=============SingleThreadEventExecutor============================================
+protected final boolean runAllTasksFrom(Queue<Runnable> taskQueue) {
+        Runnable task = pollTaskFrom(taskQueue);
+        if (task == null) {
+            return false;
+        }
+        for (;;) {
+            safeExecute(task);
+            task = pollTaskFrom(taskQueue);
+            if (task == null) {
+                return true;
+            }
+        }
+    }
+//================AbstractEventExecutor===============================================
+ protected static void safeExecute(Runnable task) {
+        try {
+            task.run();
+        } catch (Throwable t) {
+            logger.warn("A task raised an exception. Task: {}", task, t);
+        }
+    }
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+##### e.任务registry0()
+
+
+
+**1.invokeHandlerAddedIfNeeded(), 执行ChannelIntailzer 的initChannel()方法，移除pipeLine中ChannelIntializer节点,将其ServerBootstrapAcceptor放入DefaultPipleLine中**
+
+
+
+```java 
+  private void register0(ChannelPromise promise) {
+            try {
+                // check if the channel is still open as it could be closed in the mean time when the register
+                // call was outside of the eventLoop
+                if (!promise.setUncancellable() || !ensureOpen(promise)) {
+                    return;
+                }
+                boolean firstRegistration = neverRegistered;
+                doRegister();
+                neverRegistered = false;
+                registered = true;
+
+                // Ensure we call handlerAdded(...) before we actually notify the promise. This is needed as the
+                // user may already fire events through the pipeline in the ChannelFutureListener.
+                pipeline.invokeHandlerAddedIfNeeded();
+
+                safeSetSuccess(promise);
+                pipeline.fireChannelRegistered();
+                // Only fire a channelActive if the channel has never been registered. This prevents firing
+                // multiple channel actives if the channel is deregistered and re-registered.
+                if (isActive()) {
+                    if (firstRegistration) {
+                        pipeline.fireChannelActive();
+                    } else if (config().isAutoRead()) {
+                        // This channel was registered before and autoRead() is set. This means we need to begin read
+                        // again so that we process inbound data.
+                        //
+                        // See https://github.com/netty/netty/issues/4805
+                        beginRead();
+                    }
+                }
+            } catch (Throwable t) {
+                // Close the channel directly to avoid FD leak.
+                closeForcibly();
+                closeFuture.setClosed();
+                safeSetFailure(promise, t);
+            }
+        }
+```
+
+
+
+
+
+
+
+**2.pipeline.fireChannelRegistered()，最先的一个节点是HeadContext,调用了它的channelRegister方法,会依次调用DefaultPipeLine中的handler的register方法，这里也就是ServerBootStrapAcceptor的channelRegistry方法**
+
+
+
+```java 
+ @Override
+    public final ChannelPipeline fireChannelRegistered() {
+        AbstractChannelHandlerContext.invokeChannelRegistered(head);
+        return this;
+    }
+//============================================================
+ static void invokeChannelRegistered(final AbstractChannelHandlerContext next) {
+        EventExecutor executor = next.executor();
+        if (executor.inEventLoop()) {
+            next.invokeChannelRegistered();
+        } else {
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    next.invokeChannelRegistered();
+                }
+            });
+        }
+    }
+//==============================================================
+ private void invokeChannelRegistered() {
+        if (invokeHandler()) {
+            try {
+                ((ChannelInboundHandler) handler()).channelRegistered(this);
+            } catch (Throwable t) {
+                notifyHandlerException(t);
+            }
+        } else {
+            fireChannelRegistered();
+        }
+    }
+```
+
+
+
+
+
+**HeadContext  channelRegister方法的实现**
+
+寻找到自己的下一节点，再次调用invokeChannelRegistered(final AbstractChannelHandlerContext next)方法，这样就能调用下一个节点hander的channelRegister方法。
+
+```java 
+ @Override
+        public void channelRegistered(ChannelHandlerContext ctx) {
+            invokeHandlerAddedIfNeeded();
+            ctx.fireChannelRegistered();
+        }
+//==========================================================
+  @Override
+    public ChannelHandlerContext fireChannelRegistered() {
+        invokeChannelRegistered(findContextInbound(MASK_CHANNEL_REGISTERED));
+        return this;
+    }
+//=====================================================
+ private AbstractChannelHandlerContext findContextInbound(int mask) {
+        AbstractChannelHandlerContext ctx = this;
+        do {
+            ctx = ctx.next;
+        } while ((ctx.executionMask & mask) == 0);
+        return ctx;
+    }
+
+```
+
+
+
+
+
+
+
+
+
+##### f. accept事件   NioMessageBuffer  unsafe.read()方法
+
+1.其中byteBuf 是注册过accept事件的selector.select() 出来的SocketChannel.
+
+2.在SocketUtil.accpet使用ServerSockerChannel.accept接收客户端连接
+
+3.调用NioSocketChannel包装获取的客户端连接。并且放入Read事件。创建PipeLine
+
+4.其中使用NioServerSocketChannel 的 handler ServerBootStrapAcceptor调用它的channelRead方法.把用户定义的handler放入自身的handler当中去。
+
+5.把传入的SocketChannel注册到ChildGroup里面的EventLoop当中会重走一遍NioEventLoop 的register方法。这次监听的是Selector.Read事件
+
+```java 
+ public void read() {
+            assert eventLoop().inEventLoop();
+            final ChannelConfig config = config();
+            final ChannelPipeline pipeline = pipeline();
+            final RecvByteBufAllocator.Handle allocHandle = unsafe().recvBufAllocHandle();
+            allocHandle.reset(config);
+
+            boolean closed = false;
+            Throwable exception = null;
+            try {
+                try {
+                    do {
+                        int localRead = doReadMessages(readBuf);
+                        if (localRead == 0) {
+                            break;
+                        }
+                        if (localRead < 0) {
+                            closed = true;
+                            break;
+                        }
+
+                        allocHandle.incMessagesRead(localRead);
+                    } while (allocHandle.continueReading());
+                } catch (Throwable t) {
+                    exception = t;
+                }
+
+                int size = readBuf.size();
+                for (int i = 0; i < size; i ++) {
+                    readPending = false;
+                    pipeline.fireChannelRead(readBuf.get(i));
+                }
+                readBuf.clear();
+                allocHandle.readComplete();
+                pipeline.fireChannelReadComplete();
+
+                if (exception != null) {
+                    closed = closeOnReadError(exception);
+
+                    pipeline.fireExceptionCaught(exception);
+                }
+
+                if (closed) {
+                    inputShutdown = true;
+                    if (isOpen()) {
+                        close(voidPromise());
+                    }
+                }
+            } finally {
+                // Check if there is a readPending which was not processed yet.
+                // This could be for two reasons:
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
+                //
+                // See https://github.com/netty/netty/issues/2254
+                if (!readPending && !config.isAutoRead()) {
+                    removeReadOp();
+                }
+            }
+        }
+    }
+//===========================================================================
+   protected int doReadMessages(List<Object> buf) throws Exception {
+        SocketChannel ch = SocketUtils.accept(javaChannel());
+
+        try {
+            if (ch != null) {
+                buf.add(new NioSocketChannel(this, ch));
+                return 1;
+            }
+        } catch (Throwable t) {
+            logger.warn("Failed to create a new channel from an accepted socket.", t);
+
+            try {
+                ch.close();
+            } catch (Throwable t2) {
+                logger.warn("Failed to close a socket.", t2);
+            }
+        }
+
+        return 0;
+    }
+//=========================================================================
+ public NioSocketChannel(Channel parent, SocketChannel socket) {
+        super(parent, socket);
+        config = new NioSocketChannelConfig(this, socket.socket());
+    }
+//=========================================================================
+ protected AbstractNioByteChannel(Channel parent, SelectableChannel ch) {
+        super(parent, ch, SelectionKey.OP_READ);
+    }
+
+//=========================================================================
+ protected AbstractNioChannel(Channel parent, SelectableChannel ch, int readInterestOp) {
+        super(parent);
+        this.ch = ch;
+        this.readInterestOp = readInterestOp;
+        try {
+            ch.configureBlocking(false);
+        } catch (IOException e) {
+            try {
+                ch.close();
+            } catch (IOException e2) {
+                if (logger.isWarnEnabled()) {
+                    logger.warn(
+                            "Failed to close a partially initialized socket.", e2);
+                }
+            }
+
+            throw new ChannelException("Failed to enter non-blocking mode.", e);
+        }
+    }
+//=========================================================================
+//========================================================================
+public final ChannelPipeline fireChannelRead(Object msg) {
+        AbstractChannelHandlerContext.invokeChannelRead(head, msg);
+        return this;
+    }
+//==========================================================
+ static void invokeChannelRead(final AbstractChannelHandlerContext next, Object msg) {
+        final Object m = next.pipeline.touch(ObjectUtil.checkNotNull(msg, "msg"), next);
+        EventExecutor executor = next.executor();
+        if (executor.inEventLoop()) {
+            next.invokeChannelRead(m);
+        } else {
+            executor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    next.invokeChannelRead(m);
+                }
+            });
+        }
+    }
+//===========================================================
+ private void invokeChannelRead(Object msg) {
+        if (invokeHandler()) {
+            try {
+                ((ChannelInboundHandler) handler()).channelRead(this, msg);
+            } catch (Throwable t) {
+                notifyHandlerException(t);
+            }
+        } else {
+            fireChannelRead(msg);
+        }
+    }
+//========================================================================
+@Override
+        @SuppressWarnings("unchecked")
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
+            final Channel child = (Channel) msg;
+
+            child.pipeline().addLast(childHandler);
+
+            setChannelOptions(child, childOptions, logger);
+
+            for (Entry<AttributeKey<?>, Object> e: childAttrs) {
+                child.attr((AttributeKey<Object>) e.getKey()).set(e.getValue());
+            }
+
+            try {
+                childGroup.register(child).addListener(new ChannelFutureListener() {
+                    @Override
+                    public void operationComplete(ChannelFuture future) throws Exception {
+                        if (!future.isSuccess()) {
+                            forceClose(child, future.cause());
+                        }
+                    }
+                });
+            } catch (Throwable t) {
+                forceClose(child, t);
+            }
+        }
+
+```
+
+
+
+
+
+
+
+##### g.read事件  NioByteBuffer  unsafe.read() 方法
+
+  pipeline.fireChannelReadComplete(); 按着用户自己设置的handler 责任链模式的一个个调用。处理客户端有read事件的socketChannel
+
+```java 
+ public final void read() {
+            final ChannelConfig config = config();
+            if (shouldBreakReadReady(config)) {
+                clearReadPending();
+                return;
+            }
+            final ChannelPipeline pipeline = pipeline();
+            final ByteBufAllocator allocator = config.getAllocator();
+            final RecvByteBufAllocator.Handle allocHandle = recvBufAllocHandle();
+            allocHandle.reset(config);
+
+            ByteBuf byteBuf = null;
+            boolean close = false;
+            try {
+                do {
+                    byteBuf = allocHandle.allocate(allocator);
+                    allocHandle.lastBytesRead(doReadBytes(byteBuf));
+                    if (allocHandle.lastBytesRead() <= 0) {
+                        // nothing was read. release the buffer.
+                        byteBuf.release();
+                        byteBuf = null;
+                        close = allocHandle.lastBytesRead() < 0;
+                        if (close) {
+                            // There is nothing left to read as we received an EOF.
+                            readPending = false;
+                        }
+                        break;
+                    }
+
+                    allocHandle.incMessagesRead(1);
+                    readPending = false;
+                    pipeline.fireChannelRead(byteBuf);
+                    byteBuf = null;
+                } while (allocHandle.continueReading());
+
+                allocHandle.readComplete();
+                pipeline.fireChannelReadComplete();
+
+                if (close) {
+                    closeOnRead(pipeline);
+                }
+            } catch (Throwable t) {
+                handleReadException(pipeline, byteBuf, t, close, allocHandle);
+            } finally {
+                // Check if there is a readPending which was not processed yet.
+                // This could be for two reasons:
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelRead(...) method
+                // * The user called Channel.read() or ChannelHandlerContext.read() in channelReadComplete(...) method
+                //
+                // See https://github.com/netty/netty/issues/2254
+                if (!readPending && !config.isAutoRead()) {
+                    removeReadOp();
+                }
+            }
+        }
+    }
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+####5.真正doBind 将ServerSocket绑定到监听端口
+
+
+
+
+
+## D.Netty优点
+
+###1.无锁串行化处理。
+
+对于一个SocketChannel来的读写事件。用户不主动切换线程的话，都交给同一个EventLoop的线程来执行。整个过程handler的处理没有上下文切换。充分利用了CPU。
+
+
+
+### 2.ByteBuf 内存池的设计
+
+直接内存的申请，回收。十分消耗资源的。netty提前申请好一堆ByteBuf.复用之前的直接内存。提高了资源利用率。与性能。
+
+
+
+
+
+### 3.零拷贝技术
+
+通过直接内存 即调用内核的 allocat.memory 函数。减少了数据 读取。写入 从堆内存复制到直接内存的次数。
+
+
+
+### 4.主从Reactor 线程模型。
+
+设置回调函数。等到事件触发。回调调用。比如 主的EventLoopGroup 用户监听是否有客户端连接过来。有的话，直接accept
+
+accept之后。在将SocketChannel 分配给WorkGroup里面的EventLoop .用它的Selector注册Read事件。之后对整个SocketChannel的读写事件处理全都分配给这个EventLoop.
+
+
+
+### 5.灵活的TCP参数设置
+
+比如系统SocketBuff的设置。
+
+
+
+
+
+### 6.支持高性能的序列化协议。
+
+比如HTTP  协议的编码 解码
 
 
 
@@ -493,15 +1860,85 @@ java 中的selector
 
 
 
+# 一、linux 扩容磁盘
+
+1.fdisk /dev/sda
+
+2.提示输入命令时，输入p，查看当前分区信息：
+
+3.在Fdisk中继续输入新建分区命令：n
+
+4.直接回车，默认为主分区（primary）；
+
+5.分区号，起始扇区，结束扇区都用默认，一路回车，直到提示继续输入Fdisk命令的位置。
+
+6.接下来，我们需要为分区设置分区格式，在Fdisk命令处输入：t
+
+7.分区号用默认，直接回车，Hex代码输入：8e。代表适用Linux LVM分区类型。
+
+8.最后写入分区表，在Fdisk命令位置输入：w
+
+  可能会有磁盘正在被使用的错误提示，先不理会就好。到此，磁盘分区已完成。
+
+  此时输入如下命令，就可以看到我们新创建的dev/sda3分区了，分区格式为Linux LVM类型。
 
 
 
 
 
+9.输入如下命令，在不重启的情况下重读分区表（或者干脆重启机器）：
+
+```
+[root@localhost ~]# partprobe
+```
+
+10.重读分区表后，直接格式化分区：
+
+```
+[root@localhost ~]# mkfs.ext3 /dev/sda3
+```
 
 
 
+```
+[root@localhost ~]# lvm
+```
 
+11. 对dev/sda3进行初始化：
+
+```
+lvm> pvcreate /dev/sda3
+```
+
+
+
+12.接下来需要将新分区添加进系统默认的Volume group，centOS的默认Volume group为centos，所以输入如下命令：
+
+```
+lvm> vgextend centos /dev/sda3
+```
+
+
+
+期间会让你输入'y'来确认；
+
+```
+vgdisplay -v
+```
+
+ 就可以看到新分区sda3的详情了，记住他的容量，我们这次的扩容大小为38399；
+
+
+
+13.lvextend -l+38399 /dev/mapper/centos-root
+
+
+
+14.*xfs_growfs /dev/mapper/centos-root*
+
+
+
+操作完成，最后我们用fdisk -l来查看下：
 
 
 

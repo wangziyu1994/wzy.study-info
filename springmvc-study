@@ -1,4 +1,4 @@
-## 1.spring-mvc 准备工作
+1.spring-mvc 准备工作
 
 web.xml 配置  contextListener,servlet,contextConfigurationParam
 
@@ -221,7 +221,7 @@ protected void configureAndRefreshWebApplicationContext(ConfigurableWebApplicati
 			if (env instanceof ConfigurableWebEnvironment) {
 				((ConfigurableWebEnvironment) env).initPropertySources(getServletContext(), getServletConfig());
 			}
-	        //留给子类脱渣
+	        //留给子类t
 			postProcessWebApplicationContext(wac);
 			applyInitializers(wac);
 			//springmvc  applicationcontext的refresh 方法

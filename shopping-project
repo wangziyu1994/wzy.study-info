@@ -1,0 +1,614 @@
+#一、应用程序优化
+
+##A.解决分布式系统 登录session
+
+![image-20210918094650092](D:\gitResposity-info\wzy.study-info\images\image-20210918094650092.png)
+
+### a. 负载均衡策略采用对客户端ip 进行hash计算。这样同一个服务器永远只会访问一台服务器
+
+问题：单点故障。
+
+
+
+###b.服务器之间复制同步session
+
+问题：耗内存 占带宽
+
+
+
+###c.把session放入redis
+
+问题：增加额外技术，增加系统复杂度
+
+
+
+## B.分布式系统 接口幂等性校验
+
+接口可重复调用，再调用方多次调用的情况下，接口最终得到的结果是一致的。
+
+解决方案
+
+###a.全局ID
+
+
+
+#二、数据库优化：
+
+##A.换数据库
+
+升级 mysql》redis 》oracle》tidb 关系型性能
+
+##B.分库分表
+
+读写分离   jdbc 应用层  mycat代理层
+
+
+
+跨部门问题
+
+
+
+# 三、商品详情展示
+
+## A.换数据库
+
+
+
+
+
+##B.分库分表
+
+
+
+
+
+## C.压测
+
+
+
+
+
+## D.解决方案
+
+### 1.静态化处理
+
+把静态资源放到CDN上，减少网络IO.
+
+
+
+#### 1.问题一：如果静态页面发生很小的变动，那么所有CDN服务器的网页全部都要变动。
+
+解决：设置CDN缓存的过期时间。或者主动通知CDN向主服务器请求，更新缓存。
+
+
+
+
+
+
+
+
+
+### 2.使用缓存
+
+#### 1.中间件redis 缓存
+
+把磁盘IO转换为内存IO
+
+
+
+#####2.问题
+
+###### 1.数据一致性问题。
+
+**如果想要数据强一致性，那么就不能使用缓存**
+
+
+
+a,最终一致性
+
+解决方案:
+
+1.设置key的过期时间。让请求隔一段时间从新从数据库中获取最新值。
+
+
+
+
+
+
+
+b,实时一致性
+
+
+
+###### 2.如何把数据放入缓存?
+
+1.如果缓存数据不存在，查询数据库,更新缓存。
+
+2.如果缓存数据存在，直接获取缓存
+
+
+
+
+
+###### 3.如何一次性只让第一个请求从数据库中获取值，其他请求全部中缓存获取？
+
+1.使用分布式锁:zookeeper,redis.
+
+2.zookeeper 临时顺序节点，如果自己创建的是第一个节点，那么自己就是第一个到达的请求，此时，直接获取缓存。否则的话获取缓存。
+
+
+
+###### 4.如何保证其他没有获得锁的请求能够从缓存中获取数据？
+
+1.如果第一个请求操作数据库，更新了redis缓存的话，那么在这之后的请求没有问题，都能从缓存中获取数据。
+
+2.如果第一个请求操作数据库期间。有其他请求进来，那么此时没有获得锁的线程，肯定拿不到缓存。
+
+**解决方案**
+
+只能循环递归去尝试从缓存中获取数据。
+
+
+
+###### 5.如何在redis缓存的基础上，再次减少查询时间？
+
+**解决方案**
+
+构建JVM本地缓存。减少redis到JVM的网络IO
+
+
+
+**1.JVM本地缓存如何同步redis缓存？**
+
+使用guava框架来设置Map缓存的过期时间
+
+**2.JVM本地缓存如何淘汰?**
+
+使用guava框架的LRU算法LFU算法 来淘汰非热点数据。
+
+
+
+
+
+### 2.使用Nginx+lua，OpenResty缓存
+
+####1.实现功能：
+
+1.前端过来的http请求，会通过一台nginx分发到其他nginx上。
+
+2.另外两台nginx 通过Lua脚本 动态生成html页面返回给前端。其中后端的热点数据，可以缓存在nginx本地。查询的时候，先查询nginx本地。如果nginx本地没有，再去后端查询。并且更新nginx本地缓存。
+
+3.nginx本地的缓存，也已通过lru,lfu算法老淘汰非热点数据。
+
+
+
+
+
+
+
+
+
+
+
+## E.Redis Bloom过滤器的使用
+
+###1.Bloom过滤器的准备工作
+
+使用spring InitalBean接口  将数据库的键，经过hash计算放入Redis的bitMap当中去。
+
+初始化一个Bloom 的Intercepter加入到容器中
+
+```java 
+ @Override
+    public void afterPropertiesSet() throws Exception {
+        List<Long> list = productService.getAllProductId();
+        log.info("加载产品到布隆过滤器当中,size:{}",list.size());
+        if(!CollectionUtils.isEmpty(list)){
+            list.stream().forEach(item->{
+                //LocalBloomFilter.put(item);
+                bloomRedisService().addByBloomFilter(RedisKeyPrefixConst.PRODUCT_REDIS_BLOOM_FILTER,item+"");
+            });
+        }
+    }
+
+//=======================================================
+@Configuration
+public class IntercepterConfiguration implements WebMvcConfigurer {
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        //注册拦截器
+        registry.addInterceptor(authInterceptorHandler())
+                .addPathPatterns("/pms/productInfo/**");
+    }
+
+    @Bean
+    public BloomFilterInterceptor authInterceptorHandler(){
+        return new BloomFilterInterceptor();
+    }
+}
+```
+
+
+
+
+
+### 2.Bloom过滤器的使用
+
+intercpeter使用redis的布隆过滤器，对传入的请求进行Hash计算校验，判断是否有对应的bitmap位。没有的话，说明肯定不存在。直接拒绝掉。防止恶意请求。
+
+```java 
+public class BloomFilterInterceptor implements HandlerInterceptor {
+
+    @Autowired
+    private BloomRedisService bloomRedisService;
+
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
+        String currentUrl = request.getRequestURI();
+        PathMatcher matcher = new AntPathMatcher();
+        //解析出pathvariable
+        Map<String, String> pathVariable = matcher.extractUriTemplateVariables("/pms/productInfo/{id}", currentUrl);
+        //布隆过滤器存储在redis中
+        if(bloomRedisService.includeByBloomFilter(RedisKeyPrefixConst.PRODUCT_REDIS_BLOOM_FILTER,pathVariable.get("id"))){
+            return true;
+        }
+
+        /**
+         * 存储在本地jvm布隆过滤器中
+         */
+        /*if(LocalBloomFilter.match(pathVariable.get("id"))){
+            return true;
+        }*/
+
+        /*
+         * 不在本地布隆过滤器当中，直接返回验证失败
+         * 设置响应头
+         */
+        response.setHeader("Content-Type","application/json");
+        response.setCharacterEncoding("UTF-8");
+        String result = new ObjectMapper().writeValueAsString(CommonResult.validateFailed("产品不存在!"));
+        response.getWriter().print(result);
+        return false;
+
+    }
+
+}
+```
+
+
+
+
+
+
+
+####3.应用场景
+
+1.访问量大，QPS高，更新频率不是很高的业务
+
+2.数据一致性要求不要的业务。
+
+### 3.压缩数据。
+
+使用算法，工具类 压缩请求的数据。减少网络IO量。
+
+
+
+
+
+# 四、秒杀订单全链路优化
+
+## A.秒杀技术的特性
+
+### 1.单一职责
+
+秒杀流量是比较重要的流程，高并发，所以要与其他系统分离开来。为了不影响他业务系统。方便扩容。
+
+
+
+### 2.防止超卖
+
+如果100个库存 10000个抢购，如何保证其中恰好有100个人能买到。
+
+
+
+### 3.限流，熔断，降级。
+
+为了防止程序崩溃。限制流量。如果发生错误，要进行熔断处理。
+
+
+
+### 4.队列削峰。
+
+12306选择购票时，所有下单请求不是实时给出响应。而是放入队列。慢慢处理。
+
+
+
+### 5.防脚本刷，流量错峰。
+
+使用各种手段。比如验证码，等等。拦截脚本请求。
+
+
+
+### 6.预热，快速扣减。
+
+比如热点数据。可以放入内存。加快查询的速度。或者做提前预热。
+
+
+
+### 7.动静分离
+
+nginx做好动静分离。并使用缓存分担后端网络IO压力。
+
+
+
+## B.秒杀实战
+
+### 1.秒杀的核心问题
+
+1.高并发读 
+
+2.高并发写
+
+
+
+
+
+### 2.秒杀的核心流程
+
+1.价格计算
+
+2.库存处理
+
+
+
+
+
+### 3.高并发，库存超卖的问题
+
+#### 1.Mysql 悲观锁实现
+
+先查询库存 innodb  for update 锁住那行数据。如果满足，再修改，释放行锁。
+
+```sql 
+begin;
+select * from table  for update;
+update set where id=?
+commit/rollback;
+```
+
+**问题**
+
+1.行锁需要唯一索引。才能锁住特定的那一行。否则会升级为表锁。
+
+2.如果事务耗费较长时间。导致锁不能释放。那么处理效率变低。所以悲观锁的性能较低。
+
+
+
+
+
+#### 2.MySql 乐观锁的实现
+
+如果发生锁冲突，快速返回用户失败。让用户决定如何走向。
+
+```sql
+begin;
+select  condition  from table ;
+update set where id= ? and version=${version};
+commit/rollback;
+```
+
+**问题**
+
+如果失败了，需要重新不端尝试。高并发时，CPU大量时间浪费再锁资源的竞争。
+
+
+
+#### 3.数据上锁的问题
+
+##### 1.性能问题
+
+数据库资源非常有限。上锁的开销太大。
+
+
+
+##### 2.个数问题
+
+如果一个一个卖没有问题。但是加入一个请求要求买2个。那么乐观锁库存的判断可能出现问题
+
+
+
+##### 3.架构问题
+
+100 个商品  1000个请求扣减数据库，剩余900个请求不必要。
+
+
+
+##### 4.解决方案
+
+###### 1.使用redis缓存 预下单。
+
+1.本JVM启动时，从数据库库存表，同步库存到redis。
+
+2.扣减库存时，先从redis扣减，如果redis有剩余的，扣减。并且扣减数据库。否则的直接返回售完。
+
+
+
+###### 2.使用JVM本地缓存。避免redis 网络IO
+
+**问题：本地JVM redis库存扣减。如何同步给其他JVM**
+
+**解决方案**
+
+1.使用zookeeper watcher机制 监听某个节点。一旦某个节点发生变化，那么监听该节点的所有JVM客户端都能收到通知。
+
+2.使用redis的 publish 订阅主题 通过主题推送来解决。
+
+
+
+
+
+### 4.拦截掉无效下单，数据库对有效的下单依然处理很慢
+
+#### 1.解决方案：异步下单
+
+1.使用RocketMQ 削峰,向RocketMq 的topic 生产订单消息
+
+2.消费者处理topic里面的订单消息
+
+3.对外提供订单状态查询接口。秒杀成功，订单处理中。秒杀失败。
+
+
+
+##### 1.异步下单的问题：如何处理规定时间内未支付的订单？
+
+a,采用定时任务轮询的方式。 缺点：时效性较差。
+
+b.采用RocketMQ延时消息的功能。
+
+指定延时时间，向指定队列发送延迟消息。这样消费者消费这个Topic下的消息。此时判断订单是否处于已支付状态。如果没有的话，那么直接取消订单。并且同步redis库存。
+
+
+
+
+
+
+
+###5.秒杀后台对数据库操作之后，怎么保持数据库与Redis的同步？
+
+1.引入中间件Canal
+
+
+
+Canal自己相当于mysql 的一个salve实例 ，mysql 通过binlog 保持和canal的同步。
+
+canal可以通过RocketMQ 将同步的信息 发送到Jvm，在同步到Redis.
+
+
+
+### 6.如何对秒杀系统进行限流?
+
+#### 1.设置验证码。错开秒杀高峰
+
+
+
+
+
+#### 2.如何对限流加强安全性？
+
+1.用户输入验证码，后端校验验证码，生成一个Token返回给前端。保存到redis当中，表示当前用户有秒杀商品的资格。设置过期时间。时间内必须完成下单。否则需要重新申请秒杀资格。
+
+
+
+
+
+2.设计复杂的验证码。防止程序识别。
+
+
+
+3.隐藏请求中的参数，用Token代替。
+
+
+
+
+
+**总结**
+
+1.把库存分散在不同的mysql 库中。
+
+2.设置预约活动。提前发送TOken 但是Token的数量有限。不是所有人都能真正预约到Token
+
+
+
+
+
+# 五、秒杀系统限流降级方案
+
+## A.前端限流
+
+
+
+
+
+##B.接入Nginx限流
+
+使用nginx+lua脚本 openretisry框架做限流
+
+
+
+
+
+## C.微服务网关限流
+
+### 1.springcloud-gateway  + springcloud-alibaba-sentinel结合 利用sentnel对 gateway进行限流
+
+
+
+
+
+**Sentinel规则持久化配置**
+
+1.用户通过sentinel添加规则 推送规则到nacos 配置中心  配置中心发生规则变动 监听器执行回调方法。触发应用内存变更。
+
+2.用户通过nacos控制太添加规则 推送规则到nacos配置中心  配置中心发生规则变动 监听器执行回调方法。触发应用内存变更。
+
+## D.应用层限流
+
+
+
+sentinel 控制方法
+
+
+
+
+
+## E.服务降级策略
+
+**降级的目标是牺牲次要的功能和用户体验，来保证核心功能的实现。把有限的资源保留给更核心的业务。**
+
+###1.微服务内部调用的降级
+
+foeign内部调用的降级可以使用feign与Sentinel整合。来实现降级
+
+
+
+
+
+### 2.sentinel可以对方法级别进行降级
+
+
+
+
+
+## G.拒绝服务
+
+**拒绝服务可以说是一种不得已的兜底方案，用以防止最坏情况发生，防止因把服务器压跨而长时间彻底无法提供服务**
+
+
+
+### 1.nginx层设置过载保护。直接返回http请求503 拒绝服务。
+
+
+
+### 2.JAVA  Sentinel 系统规则级别的限流
+
+
+
+
+
+
+
+
+
+# 六、分库分表
+
+## A.为什么分库分表？
+
+当单表数据量达到百万级别。那么无论怎么优化SQL。查询数据库都会耗时较长。
+
+
+
+
+
+##B.
+

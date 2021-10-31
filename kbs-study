@@ -1,0 +1,62 @@
+# 一、K8S架构
+
+## A.  ApiServer  ApiServer负责接收用户的请求，通知其他的组件去工作
+
+
+
+
+
+## B.Scheuler 它会选择合适的WorkNode 部署服务
+
+
+
+## C.ControllerManager 负责监控调整WorkNode部署的服务状态。
+
+如果一个WorkNode的服务挂了，那么Controller会马上制定策略，重新选择一个WorkNode部署服务
+
+
+
+## D.etcd K8S的存储服务
+
+
+
+## E.Kubelet  WorkNode的监视器并且与master Node通讯的组件
+
+
+
+## F.Kube-Proxy  K8s的网络代理，负责Node之间的通讯，以及流量的转发，负载均衡
+
+
+
+## G.Container  Runtime WorkerNode 的运行环境
+
+
+
+1 kubectl create deployment #创建一个deployment来管理创建的容器 
+
+
+
+2 kubectl get #显示一个或多个资源，可以使用标签过滤，默认查看当前名称空间的资源 
+
+
+
+3 kubectl expose #将一个资源暴露为一个新的kubernetes的service资源，资源包括pod (po)， service (svc)， replicationcontroller (rc)，deployment(deploy)， replicaset (rs) 
+
+
+
+4 kubectl describe #显示特定资源或资源组的详细信息 
+
+
+
+5 kubectl scale #可以对Deployment, ReplicaSet, Replication Controller, 或者StatefulSet设置新的值，可 以指定一个或多个先决条件 
+
+
+
+6 kubectl set #更改现有的应用程序资源 
+
+
+
+7 kubectl rollout #资源回滚管理
+
+
+

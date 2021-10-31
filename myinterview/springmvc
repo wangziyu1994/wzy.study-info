@@ -1,0 +1,18 @@
+#### 1.描述一下DispatchServlet的工作流程
+
+1.DispatchServlet  service方法接收到前端的各类请求
+
+2.DispatchServlet 使用HandlerMapping根据传入的url找到正确的Handler
+
+3.DispatcherServlet使用HandlerAdapter调用到对应的Handler
+
+4.Handler执行完成之后返回ModelAndView
+
+5.DispatcherServlet将MdoelAndView交给ViewResolver解析
+
+6.DispatcherServlet拿到解析过后的View.对View进行渲染
+
+7.DispatcherServlet响应用户
+
+
+

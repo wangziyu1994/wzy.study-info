@@ -179,11 +179,11 @@ void environmentPrepared(ConfigurableEnvironment environment) {
 3. 第一个监听器ConfiFileApplicationListener
 
 	```java 
-if (event instanceof ApplicationEnvironmentPreparedEvent) {
+	if (event instanceof ApplicationEnvironmentPreparedEvent) {
 	    onApplicationEnvironmentPreparedEvent((ApplicationEnvironmentPreparedEvent) event);
-}
+	}
 	//====================================================
-private void onApplicationEnvironmentPreparedEvent(ApplicationEnvironmentPreparedEvent event) {
+	private void onApplicationEnvironmentPreparedEvent(ApplicationEnvironmentPreparedEvent event) {
 	    List<EnvironmentPostProcessor> postProcessors = loadPostProcessors();//从springfactory文件中加载EnvironmentPostProcessor有关类
     postProcessors.add(this);//实例化好的posseeor类加入ConfigFile类中
 	    AnnotationAwareOrderComparator.sort(postProcessors);
@@ -192,11 +192,11 @@ private void onApplicationEnvironmentPreparedEvent(ApplicationEnvironmentPrepare
     }
 	}
 	```
-
-加载四个postProcess类，执行对应postProceessor方法
 	
-org.springframework.boot.cloud.CloudFoundryVcapEnvironmentPostProcessor,
-	
+	加载四个postProcess类，执行对应postProceessor方法
+		
+	org.springframework.boot.cloud.CloudFoundryVcapEnvironmentPostProcessor,
+		
 
 
 
@@ -219,14 +219,16 @@ org.springframework.boot.reactor.DebugAgentEnvironmentPostProcessor
 
 2. new Loader()载入实例化2个类，放入ConfigFileApplicationListener中
 
-	org.springframework.boot.env.PropertiesPropertySourceLoader, 方便解析xml,properties
-	org.springframework.boot.env.YamlPropertySourceLoader  方便解析yml,yaml	
+  org.springframework.boot.env.PropertiesPropertySourceLoader, 方便解析xml,properties
+  org.springframework.boot.env.YamlPropertySourceLoader  方便解析yml,yaml	
 
 3. load方法
 
-4. FilteredPropertySource.apply()方法 获取application.properties/xml/yml/yaml配置文件，并且读取
 
-	spring.profile.ve属性
+
+1. FilteredPropertySource.apply()方法 获取application.properties/xml/yml/yaml配置文件，并且读取
+
+  spring.profile.ve属性
 
 
 
@@ -473,7 +475,6 @@ appender下三种日志2种滚动策略  TimeBasedRollingPolicy||SizeAndTimeBase
 </rollPolicy>
 </appender>
 ===============================================================
-
 
 
 

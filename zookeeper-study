@@ -226,7 +226,7 @@ zookeeper可以做微服务的注册中心
 
 
 
-# zookeeper源码
+# 五，zookeeper选举源码
 
 ### 1. 入口
 
@@ -238,13 +238,15 @@ org.apache.zookeeper.server.quorum.QuorumPeerMain
 
 
 
+###3.createElectionAlgorithm  选举逻辑处理 包括FastLeaderElection,QuorumPeer
 
+### 4.     zookeeper采用FastLeaderElection策略
 
-### 3.createElectionAlgorithm 开始选举 zookeeper现在都采用FastLeaderElection策略
+####1.QuorumCnxManager.Listener 处理集群选举网络IO通信的
 
 listener这里会start()异步线程 BIO的方式监听选举端口 fle message这里也会start 异步线程启动。
 
-start方法在这里做了两件事情。
+listener.start方法在这里做了两件事情。主要用于处理集群选举网络IO通信的。
 
 1.建立了ServerSocket  选举端口 死循环 accept连接。
 
@@ -473,11 +475,11 @@ QuorumCnxManager.Listener listener = qcm.listener;
 
 
 
-FastLeaderElection.start方法 会另启两条线程
+####2.FastLeaderElection.start方法 会另启两条线程。用于处理网络IO传输过来的信息。比如消息的编码解码
 
-一个用于生成选票任务，并且按目标放入对应的队列当中。
+#####a,一个用于发送选票任务，将Notification封装为message,并且按目标放入对应的网络发送队列当中。
 
-一个用户拿出选票任务，并且执行选举逻辑。
+#####b,一个用于从接收队列中拿出选票任务，将message转化为Notification,并且放入处理选票任务的业务接收队列当中
 
 ```java 
  void start(){
@@ -488,9 +490,7 @@ FastLeaderElection.start方法 会另启两条线程
 
 
 
-#### 开启异步线程生成选票
-
-从总的sendqueue队列中就获取自身选票
+从总的sendqueue队列中就获取选票。这里的sendQueue是总的队列，之后会把它放入目标节点为key的队列
 
 ```java 
 public void run() {
@@ -555,25 +555,11 @@ process方法 发送目标是自身节点的选票，直接放入内存RecvQueue
 
 
 
-### 4.super.start();开启异步线程，开始集群选举逻辑
+### 5.super.start();开启异步线程，产生内部选票,开始处理外部选票，比对内外选票，执行集群选举逻辑
 
-####1.QuoromPeer 的任务 死循环 while(RUNNING)
+####1.QuoromPeer 的任务 循环 while(RUNNING) 对LOOKING,OBSERVING等等进行分别判断处理
 
-##### 1.LOOKING 状态
-
-######1.创建自身选票，放入总的SendQuueue当中
-
-自身的myid   以及自身最长的一个zxid 作为currentVote对象
-
-```java 
-if (getPeerState() == ServerState.LOOKING) {
-    currentVote = new Vote(myid, getLastLoggedZxid(), getCurrentEpoch());
-}
-```
-
-
-
-把currentVote对象放入sendQueue总的队列当中，这里的选票任务会不断被处理发送任务线程取走处理，并且会按目标分类。
+##### 1.LOOKING 状态 执行setCurrentVote方法----------》lookForLeader()
 
 ```java 
    try {
@@ -589,41 +575,32 @@ if (getPeerState() == ServerState.LOOKING) {
                         }   
 ```
 
-把自身的选票 发送给集群里的每一个节点
+##### 2,lookForLeader()方法
+
+###### 1.初始化工作
+
+创建选票集合recvset, 修改自身proposal为自身 myid zxid  epoch+1 。发送leader为自身节点的选票
 
 ```java 
-sendNotifications();
-//=========================================
-private void sendNotifications() {
-        for (long sid : self.getCurrentAndNextConfigVoters()) {
-            QuorumVerifier qv = self.getQuorumVerifier();
-            ToSend notmsg = new ToSend(ToSend.mType.notification,
-                    proposedLeader,
-                    proposedZxid,
-                    logicalclock.get(),
-                    ServerState.LOOKING,
-                    sid,
-                    proposedEpoch, qv.toString().getBytes());
-            if(LOG.isDebugEnabled()){
-                LOG.debug("Sending Notification: " + proposedLeader + " (n.leader), 0x"  +
-                      Long.toHexString(proposedZxid) + " (n.zxid), 0x" + Long.toHexString(logicalclock.get())  +
-                      " (n.round), " + sid + " (recipient), " + self.getId() +
-                      " (myid), 0x" + Long.toHexString(proposedEpoch) + " (n.peerEpoch)");
-            }
-            sendqueue.offer(notmsg);
-        }
-    }
+HashMap<Long, Vote> recvset = new HashMap<Long, Vote>();
+
+HashMap<Long, Vote> outofelection = new HashMap<Long, Vote>();
+
+int notTimeout = finalizeWait;
+
+synchronized(this){
+    //选举周期自增1
+    logicalclock.incrementAndGet();
+    //将自身设置未为proposal  leader
+    updateProposal(getInitId(), getInitLastLoggedZxid(), getPeerEpoch());
+}
+ //将上述投票信息封装为对象传到发送队列，之后BIO socket会拿到这条信息，发送给所有的集群节点.
+            sendNotifications();
 ```
 
 
 
-
-
-
-
-
-
-###### 2.死循环 如果是LOOKING状态的话 不断从接收请求队列获取任务。
+###### 2.循环 如果是自身节点LOOKING状态的话 不断从业务接收队列获取选票Notification。直至改变自身节点的状态
 
 ```java 
   while ((self.getPeerState() == ServerState.LOOKING) &&
@@ -639,7 +616,40 @@ private void sendNotifications() {
 
 
 
-如果选票周期，与自身节点选举周期相等的话，那么直接开始选举
+如果选票周期，大于自身节点选举周期的话，那么清空历史选票集合，直接开始PK选举，并且也会将自身选票发给集群其他选举角色
+
+```java 
+if (n.electionEpoch > logicalclock.get()) {
+                            logicalclock.set(n.electionEpoch);
+                            recvset.clear();
+                            if(totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
+                                    getInitId(), getInitLastLoggedZxid(), getPeerEpoch())) {
+                                updateProposal(n.leader, n.zxid, n.peerEpoch);
+                            } else {
+                                updateProposal(getInitId(),
+                                        getInitLastLoggedZxid(),
+                                        getPeerEpoch());
+                            }
+                            sendNotifications();
+```
+
+
+
+如果发送者的选举周期，小于自身节点选举周期的话，那么直接跳出循环。
+
+```java 
+else if (n.electionEpoch < logicalclock.get()) {
+                            if(LOG.isDebugEnabled()){
+                                LOG.debug("Notification election epoch is smaller than logicalclock. n.electionEpoch = 0x"
+                                        + Long.toHexString(n.electionEpoch)
+                                        + ", logicalclock=0x" + Long.toHexString(logicalclock.get()));
+                            }
+                            break;
+```
+
+
+
+如果选票周期，与自身节点选举周期相等的话，那么直接开始选举PK逻辑，并且PK获胜之后，会修改自身的选票信息，并且发送给集群中的其他选举角色。
 
 ```java 
 else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
@@ -651,7 +661,11 @@ else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
 
 
 
-**<font color='yellow'>选票竞争的核心逻辑：如果zkid较大的话，则优先。如果zkid相同的话，再比较自身的myid.大的优先</font>**
+
+
+totalOrderPredicate 比较选票与自身选举出的leader做比较，决定是否修改自身leader(初始化时，把自身节点当作leader)
+
+**<font color='yellow'>totalOrderPredicate 选票竞争的核心逻辑：如果zkid较大的话，则优先。如果zkid相同的话，再比较自身的myid.大的优先</font>**
 
 ```java 
  return ((newEpoch > curEpoch) ||
@@ -663,7 +677,9 @@ else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
 
 
 
-选举成功之后，将选票放入一个HashMap reveSet .里面存放了所有竞争成功的选票。
+选举成功之后，将选票放入一个HashMap reveSet .里面存放了所有从业务接收队列中获取的选票
+
+这个map 的key是集群中所有的选举者。value代表集群角色选举的leader相关信息
 
 ```java 
   recvset.put(n.sid, new Vote(n.leader, n.zxid, n.electionEpoch, n.peerEpoch));
@@ -671,18 +687,42 @@ else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
 
 
 
-根据选票，看是否能根据半数以上的原则选出leader.
+**<font color='yellow'>termPredicate 选举leader的核心逻辑</font>**
+
+这里遍历选举者选票集合。看此次选票 和其他选举角色的选票是否相同。相同的话，则 set里面加1
+
+只要set里面的size大于集群选举者的数量的一半以上。就直接返回true,那么代表此次选票成功选举了LEADER
 
 ```java 
  if (termPredicate(recvset,
                                 new Vote(proposedLeader, proposedZxid,
                                         logicalclock.get(), proposedEpoch))) {
+     //===================================================================================
+     for (Map.Entry<Long, Vote> entry : votes.entrySet()) {
+            if (vote.equals(entry.getValue())) {
+                voteSet.addAck(entry.getKey());
+            }
+        }
+
+        return voteSet.hasAllQuorums();
+     //======================================================================================
+         public boolean hasAllQuorums() {
+        for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
+            if (!qvAckset.getQuorumVerifier().containsQuorum(qvAckset.getAckset()))
+                return false;
+        }
+        return true;
+    }
+     //==================================================================================
+     public boolean containsQuorum(Set<Long> ackSet) {
+        return (ackSet.size() > half);
+    }
 
 ```
 
 
 
-循环判断
+循环判断 不断比对选票。将胜出的选票不断重新放入业务接收者队列。直至业务接收者队列为空。
 
 ```java 
  while((n = recvqueue.poll(finalizeWait,
@@ -714,9 +754,105 @@ else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
 
 
 
-##### 2.如果集群已经完成选举。新的节点刚加入集群的话，同样也会进入选举
+
+
+
+
+
+
+#### 2.如果集群已经完成选举。新的节点刚加入集群的话，同样也会进入选举。
+
+同样也会选举自身，并将自身选票发给集群中的其他选举角色。其他节点如果FOLLOWING，或者LEADERING状态。
+
+会在业务接收队列 将自己的leader选票发送给新加入的节点。
 
 ```java 
+else {
+                                /*
+                                 * If this server is not looking, but the one that sent the ack
+                                 * is looking, then send back what it believes to be the leader.
+                                 */
+                                Vote current = self.getCurrentVote();
+                                if(ackstate == ServerState.LOOKING){
+                                    if(LOG.isDebugEnabled()){
+                                        LOG.debug("Sending new notification. My id ={} recipient={} zxid=0x{} leader={} config version = {}",
+                                                self.getId(),
+                                                response.sid,
+                                                Long.toHexString(current.getZxid()),
+                                                current.getId(),
+                                                Long.toHexString(self.getQuorumVerifier().getVersion()));
+                                    }
+
+                                    QuorumVerifier qv = self.getQuorumVerifier();
+                                    ToSend notmsg = new ToSend(
+                                            ToSend.mType.notification,
+                                            current.getId(),
+                                            current.getZxid(),
+                                            current.getElectionEpoch(),
+                                            self.getPeerState(),
+                                            response.sid,
+                                            current.getPeerEpoch(),
+                                            qv.toString().getBytes());
+                                    sendqueue.offer(notmsg);
+                                }
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        LOG.warn("Interrupted Exception while waiting for new message" +
+                                e.toString());
+                    }
+                }
+```
+
+
+
+新加入的节点会收到其他已经选出leader节点的选票。选票的状态是LEADING,leader都是此前成功选举的leader,此时新加入的节点会进行选举
+
+termPredicate的逻辑：验证当收到的选票leader是否超过集群半数以上
+
+如果通过，那么新加入的节点就会遵循已经选举出来的leader,把自身leader设置为已经选举出来的leader
+
+```java 
+                    case FOLLOWING:
+                    case LEADING:
+                        /*
+                         * Consider all notifications from the same epoch
+                         * together.
+                         */
+                        if(n.electionEpoch == logicalclock.get()){
+                            recvset.put(n.sid, new Vote(n.leader, n.zxid, n.electionEpoch, n.peerEpoch));
+                            if(termPredicate(recvset, new Vote(n.version, n.leader,
+                                            n.zxid, n.electionEpoch, n.peerEpoch, n.state))
+                                            && checkLeader(outofelection, n.leader, n.electionEpoch)) {
+                                self.setPeerState((n.leader == self.getId()) ?
+                                        ServerState.LEADING: learningState());
+                                Vote endVote = new Vote(n.leader, 
+                                        n.zxid, n.electionEpoch, n.peerEpoch);
+                                leaveInstance(endVote);
+                                return endVote;
+                            }
+                        }
+
+                        /*
+                         * Before joining an established ensemble, verify that
+                         * a majority are following the same leader.
+                         */
+                        outofelection.put(n.sid, new Vote(n.version, n.leader, 
+                                n.zxid, n.electionEpoch, n.peerEpoch, n.state));
+                        if (termPredicate(outofelection, new Vote(n.version, n.leader,
+                                n.zxid, n.electionEpoch, n.peerEpoch, n.state))
+                                && checkLeader(outofelection, n.leader, n.electionEpoch)) {
+                            synchronized(this){
+                                logicalclock.set(n.electionEpoch);
+                                self.setPeerState((n.leader == self.getId()) ?
+                                        ServerState.LEADING: learningState());
+                            }
+                            Vote endVote = new Vote(n.leader, n.zxid, 
+                                    n.electionEpoch, n.peerEpoch);
+                            leaveInstance(endVote);
+                            return endVote;
+                        }
+                        break;
 ```
 
 
@@ -727,7 +863,1547 @@ else if (totalOrderPredicate(n.leader, n.zxid, n.peerEpoch,
 
 
 
+#### 3.如果集群选举的leader宕机，那么处于FOLLOWING状态的集群节点会重新进入选举.
 
+如果FOLLOWER挂了，那么socket连接必定断掉，此时follower.followerleader方法会抛出异常，此方法主要完成和leader进行数据同步的。那么就会进入finally块。调用updateServerState()方法，它会修改当前节点为LOOKING状态。所以会重新进入下一轮循环。重新开始新的选举周期。选举周期也会被自增一
+
+```java 
+ case FOLLOWING:
+                    try {
+                       LOG.info("FOLLOWING");
+                        setFollower(makeFollower(logFactory));
+                        follower.followLeader();
+                    } catch (Exception e) {
+                       LOG.warn("Unexpected exception",e);
+                    } finally {
+                       follower.shutdown();
+                       setFollower(null);
+                       updateServerState();
+                    }
+                    break;
+//======================================================================
+    private synchronized void updateServerState(){
+       if (!reconfigFlag) {
+           setPeerState(ServerState.LOOKING);
+           LOG.warn("PeerState set to LOOKING");
+           return;
+       }
+       
+       if (getId() == getCurrentVote().getId()) {
+           setPeerState(ServerState.LEADING);
+           LOG.debug("PeerState set to LEADING");
+       } else if (getLearnerType() == LearnerType.PARTICIPANT) {
+           setPeerState(ServerState.FOLLOWING);
+           LOG.debug("PeerState set to FOLLOWING");
+       } else if (getLearnerType() == LearnerType.OBSERVER) {
+           setPeerState(ServerState.OBSERVING);
+           LOG.debug("PeerState set to OBSERVER");
+       } else { // currently shouldn't happen since there are only 2 learner types
+           setPeerState(ServerState.LOOKING);
+           LOG.debug("Shouldn't be here");
+       }       
+       reconfigFlag = false;   
+    }
+```
+
+
+
+
+
+
+
+#六,zookeeper RUNNING状态同步数据源码
+
+#### 1.当前节点的角色为FOLLOWING状态的话
+
+Follower会主动发动socket与LEADER建立连接，并且会通过一个while死循环，不断接收从leader获得的数据。
+
+一旦LEADERINGC宕机，那么抛出异常，跳出循环，进入重新选举的流程
+
+```java 
+//=
+case FOLLOWING:
+                    try {
+                       LOG.info("FOLLOWING");
+                        setFollower(makeFollower(logFactory));
+                        follower.followLeader();
+                    } catch (Exception e) {
+                       LOG.warn("Unexpected exception",e);
+                    } finally {
+                       follower.shutdown();
+                       setFollower(null);
+                       updateServerState();
+                    }
+                    break;
+//===========================Follower===========================================z
+  void followLeader() throws InterruptedException {
+        self.end_fle = Time.currentElapsedTime();
+        long electionTimeTaken = self.end_fle - self.start_fle;
+        self.setElectionTimeTaken(electionTimeTaken);
+        LOG.info("FOLLOWING - LEADER ELECTION TOOK - {} {}", electionTimeTaken,
+                QuorumPeer.FLE_TIME_UNIT);
+        self.start_fle = 0;
+        self.end_fle = 0;
+        fzk.registerJMX(new FollowerBean(this, zk), self.jmxLocalPeerBean);
+        try {
+            QuorumServer leaderServer = findLeader();            
+            try {
+                connectToLeader(leaderServer.addr, leaderServer.hostname);
+                long newEpochZxid = registerWithLeader(Leader.FOLLOWERINFO);
+                if (self.isReconfigStateChange())
+                   throw new Exception("learned about role change");
+                //check to see if the leader zxid is lower than ours
+                //this should never happen but is just a safety check
+                long newEpoch = ZxidUtils.getEpochFromZxid(newEpochZxid);
+                if (newEpoch < self.getAcceptedEpoch()) {
+                    LOG.error("Proposed leader epoch " + ZxidUtils.zxidToString(newEpochZxid)
+                            + " is less than our accepted epoch " + ZxidUtils.zxidToString(self.getAcceptedEpoch()));
+                    throw new IOException("Error: Epoch of leader is lower");
+                }
+                syncWithLeader(newEpochZxid);                
+                QuorumPacket qp = new QuorumPacket();
+                while (this.isRunning()) {
+                    readPacket(qp);
+                    processPacket(qp);
+                }
+            } catch (Exception e) {
+                LOG.warn("Exception when following the leader", e);
+                try {
+                    sock.close();
+                } catch (IOException e1) {
+                    e1.printStackTrace();
+                }
+    
+                // clear pending revalidations
+                pendingRevalidations.clear();
+            }
+        } finally {
+            zk.unregisterJMX((Learner)this);
+        }
+    }     
+```
+
+
+
+
+
+#### 2.如果当前节点是LEADING状态的话
+
+leader节点会开启serversocket 监听与FOLLOWER同步数据的端口。这样，一旦FOLLOWER端与leader建立了连接，那么LEADER就能感知到，并且做同步数据的业务逻辑。
+
+```java 
+case LEADING:
+                    LOG.info("LEADING");
+                    try {
+                        setLeader(makeLeader(logFactory));
+                        leader.lead();
+                        setLeader(null);
+                    } catch (Exception e) {
+                        LOG.warn("Unexpected exception",e);
+                    } finally {
+                        if (leader != null) {
+                            leader.shutdown("Forcing shutdown");
+                            setLeader(null);
+                        }
+                        updateServerState();
+                    }
+                    break;
+                }
+//==============================================================================
+  protected Leader makeLeader(FileTxnSnapLog logFactory) throws IOException, X509Exception {
+        return new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
+    }
+//====================================================================================
+  if (self.getQuorumListenOnAllIPs()) {
+                    ss = new ServerSocket(self.getQuorumAddress().getPort());
+                } else {
+                    ss = new ServerSocket();
+                }
+            }
+            ss.setReuseAddress(true);
+            if (!self.getQuorumListenOnAllIPs()) {
+                ss.bind(self.getQuorumAddress());
+            }
+```
+
+
+
+
+
+##### 1.加载磁盘数据到内存
+
+```java 
+zk.loadData();
+```
+
+
+
+##### 2.同步数据给FOLLOWER
+
+之前leader端已经开启了BIO serversocket，现在等leader加载数据到内存完成之后，就会开启异步线程将自身数据同步到FOLLOWER，首先会获取leader数据并且封装。之后又会开启异步线程将数据发送给FOLLOWER
+
+```java 
+cnxAcceptor.start();
+//=============================================================================================
+while (!stop) {
+    Socket s = null;
+    boolean error = false;
+    try {
+        s = ss.accept();
+
+        // start with the initLimit, once the ack is processed
+        // in LearnerHandler switch to the syncLimit
+        s.setSoTimeout(self.tickTime * self.initLimit);
+        s.setTcpNoDelay(nodelay);
+
+        BufferedInputStream is = new BufferedInputStream(
+            s.getInputStream());
+        LearnerHandler fh = new LearnerHandler(s, is, Leader.this);
+        fh.start();
+        //============================LearnerHandler==================================================
+        leader.zk.getZKDatabase().serializeSnapshot(oa);
+        oa.writeString("BenWasHere", "signature");
+        bufferedOutput.flush();
+```
+
+
+
+#### 3.leader自身启动过程中会构建处理客户端请求的责任链
+
+在客户端发送请求到leader节点的时候，leader会按照此条责任链，处理请求。
+
+```java 
+ startZkServer();
+//==========Leader======================================================
+ zk.startup();
+//============LeaderZookeeper===========================================
+ public synchronized void startup() {
+        super.startup();
+        if (containerManager != null) {
+            containerManager.start();
+        }
+    }
+//======================ZookeeperServer=================================================
+ public synchronized void startup() {
+        if (sessionTracker == null) {
+            createSessionTracker();
+        }
+        startSessionTracker();
+        setupRequestProcessors();
+
+        registerJMX();
+
+        setState(State.RUNNING);
+        notifyAll();
+    }
+//=====================ZookeeperServer============================================
+protected void setupRequestProcessors() {
+        RequestProcessor finalProcessor = new FinalRequestProcessor(this);
+        RequestProcessor syncProcessor = new SyncRequestProcessor(this,
+                finalProcessor);
+        ((SyncRequestProcessor)syncProcessor).start();
+        firstProcessor = new PrepRequestProcessor(this, syncProcessor);
+        ((PrepRequestProcessor)firstProcessor).start();
+    }
+```
+
+
+
+#### 4.leader会定时发送ping与FOLLOEW保持长连接
+
+```java 
+for (LearnerHandler f : getLearners()) {
+                    f.ping();
+                }
+//=========LearnHandler======================================================
+ public void ping() {
+        // If learner hasn't sync properly yet, don't send ping packet
+        // otherwise, the learner will crash
+        if (!sendingThreadStarted) {
+            return;
+        }
+        long id;
+        if (syncLimitCheck.check(System.nanoTime())) {
+            synchronized(leader) {
+                id = leader.lastProposed;
+            }
+            QuorumPacket ping = new QuorumPacket(Leader.PING, id, null, null);
+            queuePacket(ping);
+        } else {
+            LOG.warn("Closing connection to peer due to transaction timeout.");
+            shutdown();
+        }
+    }
+```
+
+
+
+# 七、zookeeper 客户端发送数据端源码
+
+## A.Nio或者Netty与服务端建立网络连接
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 八、zookeeper 服务端接收数据源码
+
+##A、客户端发送请求
+
+### 1.创建NIO Socket
+
+创建Nio或者 netty的socket,开启异步线程 建立与服务端的socket连接。
+
+selector.select在那里阻塞 
+
+```java 
+new zookeeper()
+//========================Zookeeper=======================
+     cnxn = new ClientCnxn(connectStringParser.getChrootPath(),
+                hostProvider, sessionTimeout, this, watchManager,
+                getClientCnxnSocket(), canBeReadOnly);
+//========================ClientCxn============
+  public ClientCnxn(String chrootPath, HostProvider hostProvider, int sessionTimeout, ZooKeeper zooKeeper,
+            ClientWatchManager watcher, ClientCnxnSocket clientCnxnSocket,
+            long sessionId, byte[] sessionPasswd, boolean canBeReadOnly) {
+        this.zooKeeper = zooKeeper;
+        this.watcher = watcher;
+        this.sessionId = sessionId;
+        this.sessionPasswd = sessionPasswd;
+        this.sessionTimeout = sessionTimeout;
+        this.hostProvider = hostProvider;
+        this.chrootPath = chrootPath;
+
+        connectTimeout = sessionTimeout / hostProvider.size();
+        readTimeout = sessionTimeout * 2 / 3;
+        readOnly = canBeReadOnly;
+
+        sendThread = new SendThread(clientCnxnSocket);
+        eventThread = new EventThread();
+
+    }
+//===========Zookeeper=====================
+cnxn.start();
+//===========ClientCxn=============================
+  public void start() {
+        sendThread.start();
+        eventThread.start();
+    }
+//==============ClientCxn===============================================
+ clientCnxnSocket.doTransport(to, pendingQueue, outgoingQueue, ClientCnxn.this);
+//==============ClientCxnSocketNIO===========================================
+   void doTransport(int waitTimeOut, List<Packet> pendingQueue, LinkedList<Packet> outgoingQueue,
+                     ClientCnxn cnxn)
+            throws IOException, InterruptedException {
+        selector.select(waitTimeOut);
+        Set<SelectionKey> selected;
+        synchronized (this) {
+            selected = selector.selectedKeys();
+        }
+        // Everything below and until we get back to the select is
+        // non blocking, so time is effectively a constant. That is
+        // Why we just have to do this once, here
+        updateNow();
+        for (SelectionKey k : selected) {
+            SocketChannel sc = ((SocketChannel) k.channel());
+            if ((k.readyOps() & SelectionKey.OP_CONNECT) != 0) {
+                if (sc.finishConnect()) {
+                    updateLastSendAndHeard();
+                    sendThread.primeConnection();
+                }
+            } else if ((k.readyOps() & (SelectionKey.OP_READ | SelectionKey.OP_WRITE)) != 0) {
+                doIO(pendingQueue, outgoingQueue, cnxn);
+            }
+        }
+        if (sendThread.getZkState().isConnected()) {
+            synchronized(outgoingQueue) {
+                if (findSendablePacket(outgoingQueue,
+                        cnxn.sendThread.clientTunneledAuthenticationInProgress()) != null) {
+                    enableWrite();
+                }
+            }
+        }
+        selected.clear();
+    }
+```
+
+
+
+### 2.客户端create 发送写请求
+
+1.将请求封装为packet,将packet放入outgoingQueue队列
+
+2.唤醒sengThread 任务里面selector.select()方法,与上文建立客户端连接相呼应,之前selector.select阻塞的线程，就可以往下执行了
+
+3.之后会被packet.wait导致阻塞，直至从服务端得到响应。
+
+```java 
+//===============================zookeeper======================================= 
+ReplyHeader r = cnxn.submitRequest(h, request, response, null);
+//===============================ClientCxn==========================================
+public ReplyHeader submitRequest(RequestHeader h, Record request,
+            Record response, WatchRegistration watchRegistration)
+            throws InterruptedException {
+        ReplyHeader r = new ReplyHeader();
+        Packet packet = queuePacket(h, r, request, response, null, null, null,
+                    null, watchRegistration);
+        synchronized (packet) {
+            while (!packet.finished) {
+                packet.wait();
+            }
+        }
+        return r;
+    }
+//==============================ClientCxn================================
+    Packet queuePacket(RequestHeader h, ReplyHeader r, Record request,
+            Record response, AsyncCallback cb, String clientPath,
+            String serverPath, Object ctx, WatchRegistration watchRegistration)
+    {
+        Packet packet = null;
+
+        // Note that we do not generate the Xid for the packet yet. It is
+        // generated later at send-time, by an implementation of ClientCnxnSocket::doIO(),
+        // where the packet is actually sent.
+        synchronized (outgoingQueue) {
+            packet = new Packet(h, r, request, response, watchRegistration);
+            packet.cb = cb;
+            packet.ctx = ctx;
+            packet.clientPath = clientPath;
+            packet.serverPath = serverPath;
+            if (!state.isAlive() || closing) {
+                conLossPacket(packet);
+            } else {
+                // If the client is asking to close the session then
+                // mark as closing
+                if (h.getType() == OpCode.closeSession) {
+                    closing = true;
+                }
+                outgoingQueue.add(packet);
+            }
+        }
+        sendThread.getClientCnxnSocket().wakeupCnxn();
+        return packet;
+    }
+ //================ClientCxnSocktNIO=========================================
+  synchronized void wakeupCnxn() {
+        selector.wakeup();
+    }
+//===============ClientCxn=========================================================
+  while (!packet.finished) {
+                packet.wait();
+            }
+```
+
+
+
+###3.发送写请求，触发写事件，sendThread开始处理客户端写事件。
+
+1.sendThread收到客户端写事件之后，会从outgoingQueue队列中获取消息，并且序列化未byte通过NIO的方式发送给服务端
+
+```java 
+   if (sockKey.isWritable()) {
+            synchronized(outgoingQueue) {
+                Packet p = findSendablePacket(outgoingQueue,
+                        cnxn.sendThread.clientTunneledAuthenticationInProgress());
+
+                if (p != null) {
+                    updateLastSend();
+                    // If we already started writing p, p.bb will already exist
+                    if (p.bb == null) {
+                        if ((p.requestHeader != null) &&
+                                (p.requestHeader.getType() != OpCode.ping) &&
+                                (p.requestHeader.getType() != OpCode.auth)) {
+                            p.requestHeader.setXid(cnxn.getXid());
+                        }
+                        p.createBB();
+                    }
+                    sock.write(p.bb);
+                    if (!p.bb.hasRemaining()) {
+                        sentCount++;
+                        outgoingQueue.removeFirstOccurrence(p);
+                        if (p.requestHeader != null
+                                && p.requestHeader.getType() != OpCode.ping
+                                && p.requestHeader.getType() != OpCode.auth) {
+                            synchronized (pendingQueue) {
+                                pendingQueue.add(p);
+                            }
+                        }
+                    }
+                }
+```
+
+
+
+### 4.收到服务端响应，sendThread触发读事件。 唤醒被wait的 线程
+
+```java 
+//================ClientCxn=============================== 
+  sendThread.readResponse(incomingBuffer);
+//================ClientCxn=============================== 
+finally {
+                finishPacket(packet);
+            }
+//==============ClientCxn=================================   
+protected void finishPacket(Packet p) {
+        int err = p.replyHeader.getErr();
+        if (p.watchRegistration != null) {
+            p.watchRegistration.register(err);
+        }
+        // Add all the removed watch events to the event queue, so that the
+        // clients will be notified with 'Data/Child WatchRemoved' event type.
+        if (p.watchDeregistration != null) {
+            Map<EventType, Set<Watcher>> materializedWatchers = null;
+            try {
+                materializedWatchers = p.watchDeregistration.unregister(err);
+                for (Entry<EventType, Set<Watcher>> entry : materializedWatchers
+                        .entrySet()) {
+                    Set<Watcher> watchers = entry.getValue();
+                    if (watchers.size() > 0) {
+                        queueEvent(p.watchDeregistration.getClientPath(), err,
+                                watchers, entry.getKey());
+                        // ignore connectionloss when removing from local
+                        // session
+                        p.replyHeader.setErr(Code.OK.intValue());
+                    }
+                }
+            } catch (KeeperException.NoWatcherException nwe) {
+                p.replyHeader.setErr(nwe.code().intValue());
+            } catch (KeeperException ke) {
+                p.replyHeader.setErr(ke.code().intValue());
+            }
+        }
+
+        if (p.cb == null) {
+            synchronized (p) {
+                p.finished = true;
+                p.notifyAll();
+            }
+        } else {
+            p.finished = true;
+            eventThread.queuePacket(p);
+        }
+    }
+```
+
+
+
+
+
+## B、服务端接收请求
+
+### 1.zookeeper使用NIO或者Netty 监听端口
+
+
+
+### 2.Netty服务端接收到客户端的请求之后，会有相应的channelHandler处理
+
+1.解码客户端消息，开始进行责任链调用。责任链的构建在Leader被选举完之后。
+
+2.调用第一个责任链条节点  firstProcessor也就是  LeadRequestProcessor ,
+
+
+
+```java 
+//=====================NettyServiceCxnFactory================================================  
+NettyServerCnxn cnxn = ctx.channel().attr(CONNECTION_ATTRIBUTE).get();
+                    if (cnxn == null) {
+                        LOG.error("channelRead() on a closed or closing NettyServerCnxn");
+                    } else {
+                        cnxn.processMessage((ByteBuf) msg);
+                    }
+//===========================NettyServerCxn====================================================
+ receiveMessage(buf);
+//=======================NettyServerCxn================================================
+     zks.processPacket(this, bb);
+//==============================================
+ else {
+                Request si = new Request(cnxn, cnxn.getSessionId(), h.getXid(),
+                  h.getType(), incomingBuffer, cnxn.getAuthInfo());
+                si.setOwner(ServerCnxn.me);
+                // Always treat packet from the client as a possible
+                // local request.
+                setLocalSessionFlag(si);
+                submitRequest(si);
+            }
+//=======================ZookeeperServer==========================================
+
+    public void submitRequest(Request si) {
+        if (firstProcessor == null) {
+            synchronized (this) {
+                try {
+                    // Since all requests are passed to the request
+                    // processor it should wait for setting up the request
+                    // processor chain. The state will be updated to RUNNING
+                    // after the setup.
+                    while (state == State.INITIAL) {
+                        wait(1000);
+                    }
+                } catch (InterruptedException e) {
+                    LOG.warn("Unexpected interruption", e);
+                }
+                if (firstProcessor == null || state != State.RUNNING) {
+                    throw new RuntimeException("Not started");
+                }
+            }
+        }
+        try {
+            touch(si.cnxn);
+            boolean validpacket = Request.isValid(si.type);
+            if (validpacket) {
+                firstProcessor.processRequest(si);
+                if (si.cnxn != null) {
+                    incInProcess();
+                }
+
+
+```
+
+
+
+3.第二个责任链条节点是  PreRequestProcessor   它会把请求放入队列当中
+
+```java 
+    public void processRequest(Request request) {
+        submittedRequests.add(request);
+    }
+```
+
+
+
+4.第四个责任链条节点是 ProposalRequestProcessor  
+
+propose方法用于将请求发送给给集群其他FOLLOWER节点.
+
+之前FOLLOWER选举成功时，LEADER与FOLLOWER 已经建立了BIO  socket, 所以此处LEADER直接发送请求给其他FOLLOWER。
+
+```java 
+//===============ProposalRequestProcessor  =========================
+zks.getLeader().propose(request);
+//==============leader===================================
+  Proposal p = new Proposal();
+        p.packet = pp;
+        p.request = request;                
+        
+        synchronized(this) {
+           p.addQuorumVerifier(self.getQuorumVerifier());
+                   
+           if (request.getHdr().getType() == OpCode.reconfig){
+               self.setLastSeenQuorumVerifier(request.qv, true);                       
+           }
+           
+           if (self.getQuorumVerifier().getVersion()<self.getLastSeenQuorumVerifier().getVersion()) {
+               p.addQuorumVerifier(self.getLastSeenQuorumVerifier());
+           }
+                   
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Proposing:: " + request);
+            }
+
+            lastProposed = p.packet.getZxid();
+            outstandingProposals.put(lastProposed, p);
+            sendPacket(pp);
+        }
+```
+
+
+
+
+
+5.ProposalProcessor 里面有一个子Processor ,   SyncRequestProcessor
+
+1.这个processor先将请求放入一个QueueRequest队列当中
+
+```java 
+  syncProcessor.processRequest(request);
+//=======================================================================
+ public void processRequest(Request request) {
+        // request.addRQRec(">sync");
+        queuedRequests.add(request);
+    }
+```
+
+
+
+2.从queuedRequests队列获取请求数据，持久化到自身事务日志，之后会调用nextProessor的processRequest方法
+
+```java 
+    public void run() {
+        try {
+            int logCount = 0;
+
+            // we do this in an attempt to ensure that not all of the servers
+            // in the ensemble take a snapshot at the same time
+            int randRoll = r.nextInt(snapCount/2);
+            while (true) {
+                Request si = null;
+                if (toFlush.isEmpty()) {
+                    si = queuedRequests.take();
+                } else {
+                    si = queuedRequests.poll();
+                    if (si == null) {
+                        flush(toFlush);
+                        continue;
+                    }
+                }
+                if (si == requestOfDeath) {
+                    break;
+                }
+                if (si != null) {
+                    // track the number of records written to the log
+                    if (zks.getZKDatabase().append(si)) {
+                        logCount++;
+                        if (logCount > (snapCount / 2 + randRoll)) {
+                            randRoll = r.nextInt(snapCount/2);
+                            // roll the log
+                            zks.getZKDatabase().rollLog();
+                            // take a snapshot
+                            if (snapInProcess != null && snapInProcess.isAlive()) {
+                                LOG.warn("Too busy to snap, skipping");
+                            } else {
+                                snapInProcess = new ZooKeeperThread("Snapshot Thread") {
+                                        public void run() {
+                                            try {
+                                                zks.takeSnapshot();
+                                            } catch(Exception e) {
+                                                LOG.warn("Unexpected exception", e);
+                                            }
+                                        }
+                                    };
+                                snapInProcess.start();
+                            }
+                            logCount = 0;
+                        }
+                    } else if (toFlush.isEmpty()) {
+                        // optimization for read heavy workloads
+                        // iff this is a read, and there are no pending
+                        // flushes (writes), then just pass this to the next
+                        // processor
+                        if (nextProcessor != null) {
+                            nextProcessor.processRequest(si);
+                            if (nextProcessor instanceof Flushable) {
+                                ((Flushable)nextProcessor).flush();
+                            }
+                        }
+                        continue;
+                    }
+                    toFlush.add(si);
+                    if (toFlush.size() > 1000) {
+                        flush(toFlush);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            handleException(this.getName(), t);
+        } finally{
+            running = false;
+        }
+        LOG.info("SyncRequestProcessor exited!");
+    }  
+```
+
+
+
+
+
+2.SyncRequestProcessor的nextProcessor  是AckRequestProcessor
+
+将请求持久化到本地事务日志成功之后，给自身发一个ACK消息
+
+```java 
+    public void processRequest(Request request) {
+        QuorumPeer self = leader.self;
+        if(self != null)
+            leader.processAck(self.getId(), request.zxid, null);
+        else
+            LOG.error("Null QuorumPeer");
+    }
+
+//======================================================================
+Proposal p = outstandingProposals.get(zxid);
+        if (p == null) {
+            LOG.warn("Trying to commit future proposal: zxid 0x{} from {}",
+                    Long.toHexString(zxid), followerAddr);
+            return;
+        }
+        
+        p.addAck(sid);   
+
+```
+
+### 3.addACk之后，判断是否超过半数的集群节点返回了ACK
+
+如果是，走真正提交 
+
+```java 
+   boolean hasCommitted = tryToCommit(p, zxid, followerAddr);
+//=====================Leader================================================
+if (!p.hasAllQuorums()) {
+           return false;                 
+        }
+//=======================SyncedLearnerTracker======================================
+ public boolean hasAllQuorums() {
+        for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
+            if (!qvAckset.getQuorumVerifier().containsQuorum(qvAckset.getAckset()))
+                return false;
+        }
+        return true;
+    }
+```
+
+
+
+如果是，肯定是收到了FOLLOWER节点的ACK。当选举为LEADER成功之后，会作为BIO  ServerSocket不断处理来自FOLLOWEER的数据.这里的 processACk 就是AckProcessor的processAck方法。
+
+```java 
+  case Leader.ACK:
+                    if (this.learnerType == LearnerType.OBSERVER) {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Received ACK from Observer  " + this.sid);
+                        }
+                    }
+                    syncLimitCheck.updateAck(qp.getZxid());
+                    leader.processAck(this.sid, qp.getZxid(), sock.getLocalSocketAddress());
+                    break;
+```
+
+
+
+### 4.addAck超过集群半数以上 ，就会真正提交,同步给Observer.发出写入到内存的指令。
+
+inform方法就是同步到其他Observer,   
+
+commit方法会提交request到commit队列，这里消息主要用于通知其他FOLLOWER,让其他FOLLOWER也Commit,
+
+ wakeup 唤醒 执行CommitProcessor.run等待的线程，让其同步到内存。
+
+```
+//===============AckProcessor============================
+public void processRequest(Request request) {
+        QuorumPeer self = leader.self;
+        if(self != null)
+            leader.processAck(self.getId(), request.zxid, null);
+        else
+            LOG.error("Null QuorumPeer");
+    }
+
+//===============Leadeer=========================
+ commit(zxid);
+inform(p);
+        }
+        zk.commitProcessor.commit(p.request);
+        if(pendingSyncs.containsKey(zxid)){
+            for(LearnerSyncRequest r: pendingSyncs.remove(zxid)) {
+                sendSync(r);
+            }               
+        } 
+//==============CommitProcessor=================================
+   public void commit(Request request) {
+        if (stopped || request == null) {
+            return;
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Committing request:: " + request);
+        }
+        committedRequests.add(request);
+        if (!isProcessingCommit()) {
+            wakeup();
+        }
+    }
+```
+
+####  
+
+
+
+
+
+
+
+####1.ProposalProcessor 的下一个Processor CommitProcessor
+
+```java 
+ nextProcessor.processRequest(request);
+            if (request.getHdr() != null) {
+                // We need to sync and get consensus on any transactions
+                try {
+                    zks.getLeader().propose(request);
+                } catch (XidRolloverException e) {
+                    throw new RequestProcessorException(e.getMessage(), e);
+                }
+                syncProcessor.processRequest(request);
+            }
+```
+
+
+
+####2.将请求数据放入QueueRequest队列
+
+```java 
+    public void processRequest(Request request) {
+        if (stopped) {
+            return;
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Processing request:: " + request);
+        }
+        queuedRequests.add(request);
+        if (!isWaitingForCommit()) {
+            wakeup();
+        }
+    }
+```
+
+
+
+#### 3.CommitProcessor 在初始化过程就 启动了start方法 run
+
+这个线程会从QueueRequest里面不断取出request处理
+
+如果没有达到提交的条件会一直wait.如果满足了，会往下执行processCommit方法
+
+```java 
+ public void run() {
+        Request request;
+        try {
+            while (!stopped) {
+                synchronized(this) {
+                    while (
+                        !stopped &&
+                        ((queuedRequests.isEmpty() || isWaitingForCommit() || isProcessingCommit()) &&
+                         (committedRequests.isEmpty() || isProcessingRequest()))) {
+                        wait();
+                    }
+                }
+
+                /*
+                 * Processing queuedRequests: Process the next requests until we
+                 * find one for which we need to wait for a commit. We cannot
+                 * process a read request while we are processing write request.
+                 */
+                while (!stopped && !isWaitingForCommit() &&
+                       !isProcessingCommit() &&
+                       (request = queuedRequests.poll()) != null) {
+                    if (needCommit(request)) {
+                        nextPending.set(request);
+                    } else {
+                        sendToNextProcessor(request);
+                    }
+                }
+
+                /*
+                 * Processing committedRequests: check and see if the commit
+                 * came in for the pending request. We can only commit a
+                 * request when there is no other request being processed.
+                 */
+                processCommitted();
+            }
+        } catch (Throwable e) {
+            handleException(this.getName(), e);
+        }
+        LOG.info("CommitProcessor exited loop!");
+    }
+
+```
+
+
+
+如果否，直接返回false
+
+
+
+
+
+
+
+## C.集群FOLLOWER接收LEADER的同步数据
+
+### 1.当前节点确定为FOLLOWER角色后
+
+构建处理LEADER请求处理责任链，并且循环不断接收处理LEADER的数据
+
+这条责任链
+
+RequestProcessor--->CommitProcessor------>FinalRequestProcessor---->SynRequestProcessor------>SendAckRequestProcessor
+
+
+
+```java 
+zk.startup();
+//===============ZookeeperServer=========================
+  public synchronized void startup() {
+        if (sessionTracker == null) {
+            createSessionTracker();
+        }
+        startSessionTracker();
+        setupRequestProcessors();
+
+        registerJMX();
+
+        setState(State.RUNNING);
+        notifyAll();
+    }
+
+```
+
+
+
+### 2.不断用处理LEADER请求责任链处理LEADER接收客户端同步其他FOLLOWER的请求
+
+最终将LEADER的数据放入queuedRequests队列。
+
+SynRequestProcessor的异步线程会处理这条数据，执行持久到事务日志的任务。
+
+```java 
+//=================Follower==============================================
+case Leader.PROPOSAL:           
+            TxnHeader hdr = new TxnHeader();
+            Record txn = SerializeUtils.deserializeTxn(qp.getData(), hdr);
+            if (hdr.getZxid() != lastQueued + 1) {
+                LOG.warn("Got zxid 0x"
+                        + Long.toHexString(hdr.getZxid())
+                        + " expected 0x"
+                        + Long.toHexString(lastQueued + 1));
+            }
+            lastQueued = hdr.getZxid();
+            
+            if (hdr.getType() == OpCode.reconfig){
+               SetDataTxn setDataTxn = (SetDataTxn) txn;       
+               QuorumVerifier qv = self.configFromString(new String(setDataTxn.getData()));
+               self.setLastSeenQuorumVerifier(qv, true);                               
+            }
+            
+            fzk.logRequest(hdr, txn);
+            break;
+//=================FOLLOWERzookeeprServer===========================
+ public void logRequest(TxnHeader hdr, Record txn) {
+        Request request = new Request(hdr.getClientId(), hdr.getCxid(), hdr.getType(), hdr, txn, hdr.getZxid());
+        if ((request.zxid & 0xffffffffL) != 0) {
+            pendingTxns.add(request);
+        }
+        syncProcessor.processRequest(request);
+    }
+//=======================================================================
+
+public void processRequest(Request request) {
+        // request.addRQRec(">sync");
+        queuedRequests.add(request);
+    }
+
+
+```
+
+
+
+### 3.SendAckRequest在FOLLOWER持久化完数据后，会发送一条ACK消息给LEADER
+
+```java 
+public void processRequest(Request si) {
+        if(si.type != OpCode.sync){
+            QuorumPacket qp = new QuorumPacket(Leader.ACK, si.getHdr().getZxid(), null,
+                null);
+            try {
+                learner.writePacket(qp, false);
+            } catch (IOException e) {
+                LOG.warn("Closing connection to leader, exception during packet send", e);
+                try {
+                    if (!learner.sock.isClosed()) {
+                        learner.sock.close();
+                    }
+                } catch (IOException e1) {
+                    // Nothing to do, we are shutting things down, so an exception here is irrelevant
+                    LOG.debug("Ignoring error closing the connection", e1);
+                }
+            }
+        }
+```
+
+
+
+### 4.如果没有收到LEADER 的commit消息,CommitRequestProcessor 会一直wait等待。
+
+Follower 同样也有CommitRequestProcessor,它的逻辑和LEADER一样
+
+CommitRequestProcessor 会将数据放入到自己的队列之中，它自己的异步线程会不断从队列获取任务，然后wait等待。直到LEADER 发给FOLLOWER commit指令后，将数据加载到内存。
+
+```java 
+//=======================================================================
+   public void processRequest(Request request) {
+        if (stopped) {
+            return;
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Processing request:: " + request);
+        }
+        queuedRequests.add(request);
+        if (!isWaitingForCommit()) {
+            wakeup();
+        }
+    }
+//=========================================================================
+public void run() {
+        Request request;
+        try {
+            while (!stopped) {
+                synchronized(this) {
+                    while (
+                        !stopped &&
+                        ((queuedRequests.isEmpty() || isWaitingForCommit() || isProcessingCommit()) &&
+                         (committedRequests.isEmpty() || isProcessingRequest()))) {
+                        wait();
+                    }
+                }
+
+                /*
+                 * Processing queuedRequests: Process the next requests until we
+                 * find one for which we need to wait for a commit. We cannot
+                 * process a read request while we are processing write request.
+                 */
+                while (!stopped && !isWaitingForCommit() &&
+                       !isProcessingCommit() &&
+                       (request = queuedRequests.poll()) != null) {
+                    if (needCommit(request)) {
+                        nextPending.set(request);
+                    } else {
+                        sendToNextProcessor(request);
+                    }
+                }
+
+                /*
+                 * Processing committedRequests: check and see if the commit
+                 * came in for the pending request. We can only commit a
+                 * request when there is no other request being processed.
+                 */
+                processCommitted();
+            }
+        } catch (Throwable e) {
+            handleException(this.getName(), e);
+        }
+        LOG.info("CommitProcessor exited loop!");
+    }
+```
+
+
+
+
+
+### 5.收到来自LEADER.Commit 消息，唤醒准备写入数据到内存的线程
+
+收到LEADER服务端 commit的消息，执行CommitProcessor 的commit方法，把请求放入CommitedRequest队列，并且唤醒写数据到内存的线程。真正将数据同步到Follower 的内存。
+
+```java 
+//====================Follower================================== 
+case Leader.COMMIT:
+            fzk.commit(qp.getZxid());
+            break;
+//====================FollowerZookeeperServer============================================
+ public void commit(long zxid) {
+        if (pendingTxns.size() == 0) {
+            LOG.warn("Committing " + Long.toHexString(zxid)
+                    + " without seeing txn");
+            return;
+        }
+        long firstElementZxid = pendingTxns.element().zxid;
+        if (firstElementZxid != zxid) {
+            LOG.error("Committing zxid 0x" + Long.toHexString(zxid)
+                    + " but next pending txn 0x"
+                    + Long.toHexString(firstElementZxid));
+            System.exit(12);
+        }
+        Request request = pendingTxns.remove();
+        commitProcessor.commit(request);
+    }
+//===============CommitProcessor======================================================
+    public void commit(Request request) {
+        if (stopped || request == null) {
+            return;
+        }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Committing request:: " + request);
+        }
+        committedRequests.add(request);
+        if (!isProcessingCommit()) {
+            wakeup();
+        }
+    }
+```
+
+
+
+
+
+# 九、zookeeper Watcher监听源码
+
+## A.客户端 创建watcher
+
+###1.把watcher 封装传给服务端
+
+客户端getData watcher为true的话 会添加一个watch 到watcher Set里面 并且将自己的watcher封装为DataWatchRegistration传给服务端
+
+```java 
+//=====================zookeeper======================================================
+public byte[] getData(String path, boolean watch, Stat stat)
+            throws KeeperException, InterruptedException {
+        return getData(path, watch ? watchManager.defaultWatcher : null, stat);
+    }
+//==================zookeeper======================================================
+  WatchRegistration wcb = null;
+        if (watcher != null) {
+            wcb = new DataWatchRegistration(watcher, clientPath);
+        }
+ ReplyHeader r = cnxn.submitRequest(h, request, response, wcb);
+//============ClientCxn==================================================
+ public ReplyHeader submitRequest(RequestHeader h, Record request,
+            Record response, WatchRegistration watchRegistration)
+            throws InterruptedException {
+        ReplyHeader r = new ReplyHeader();
+        Packet packet = queuePacket(h, r, request, response, null, null, null,
+                    null, watchRegistration);
+        synchronized (packet) {
+            while (!packet.finished) {
+                packet.wait();
+            }
+        }
+        return r;
+    }
+
+```
+
+
+
+### 2.客户端处理服务端消息，如果获取的消息带有watcher的话，那么本地watcher set添加 路径和watcher
+
+```java 
+ //==================ClientCxn====================================
+     finishPacket(packet);
+//=================ClientCxn=============================
+ int err = p.replyHeader.getErr();
+        if (p.watchRegistration != null) {
+            p.watchRegistration.register(err);
+        }
+//================Zookeeper==============================
+ public void register(int rc) {
+            if (shouldAddWatch(rc)) {
+                Map<String, Set<Watcher>> watches = getWatches(rc);
+                synchronized(watches) {
+                    Set<Watcher> watchers = watches.get(clientPath);
+                    if (watchers == null) {
+                        watchers = new HashSet<Watcher>();
+                        watches.put(clientPath, watchers);
+                    }
+                    watchers.add(watcher);
+                }
+            }
+        }
+```
+
+
+
+### 3.EventThread  对服务端传回的watcher event进行处理
+
+eventThread 会对服务端的watcher event 进行循环处理。会将事件分发给每一个watcher.
+
+```java 
+ //=====================EventThread===========================================
+public void run() {
+           try {
+              isRunning = true;
+              while (true) {
+                 Object event = waitingEvents.take();
+                 if (event == eventOfDeath) {
+                    wasKilled = true;
+                 } else {
+                    processEvent(event);
+                 }
+                 if (wasKilled)
+                    synchronized (waitingEvents) {
+                       if (waitingEvents.isEmpty()) {
+                          isRunning = false;
+                          break;
+                       }
+                    }
+              }
+ //===================ClientCxn====================================
+                if (event instanceof WatcherSetEventPair) {
+                  // each watcher will process the event
+                  WatcherSetEventPair pair = (WatcherSetEventPair) event;
+                  for (Watcher watcher : pair.watchers) {
+                      try {
+                          watcher.process(pair.event);
+                      } catch (Throwable t) {
+                          LOG.error("Error while calling watcher ", t);
+                      }
+                  }
+                }
+```
+
+
+
+
+
+## B.服务端接收消息 对watcher的处理
+
+### 1.服务端在真正将数据写入到内存时，也会触发watcher 机制
+
+CommitProcessor在processCommit方法里面会调用sendToNextProcessor方法,最终会调用到FinalRequestProcessor
+
+```java 
+ protected void processCommitted() {
+        Request request;
+
+        if (!stopped && !isProcessingRequest() &&
+                (committedRequests.peek() != null)) {
+
+            /*
+             * ZOOKEEPER-1863: continue only if there is no new request
+             * waiting in queuedRequests or it is waiting for a
+             * commit. 
+             */
+            if ( !isWaitingForCommit() && !queuedRequests.isEmpty()) {
+                return;
+            }
+            request = committedRequests.poll();
+
+            /*
+             * We match with nextPending so that we can move to the
+             * next request when it is committed. We also want to
+             * use nextPending because it has the cnxn member set
+             * properly.
+             */
+            Request pending = nextPending.get();
+            if (pending != null &&
+                pending.sessionId == request.sessionId &&
+                pending.cxid == request.cxid) {
+                // we want to send our version of the request.
+                // the pointer to the connection in the request
+                pending.setHdr(request.getHdr());
+                pending.setTxn(request.getTxn());
+                pending.zxid = request.zxid;
+                // Set currentlyCommitting so we will block until this
+                // completes. Cleared by CommitWorkRequest after
+                // nextProcessor returns.
+                currentlyCommitting.set(pending);
+                nextPending.set(null);
+                sendToNextProcessor(pending);
+            } else {
+                // this request came from someone else so just
+                // send the commit packet
+                currentlyCommitting.set(request);
+                sendToNextProcessor(request);
+            }
+        }      
+    }
+
+//=====================================================================
+   private void sendToNextProcessor(Request request) {
+        numRequestsProcessing.incrementAndGet();
+        workerPool.schedule(new CommitWorkRequest(request), request.sessionId);
+    }
+//====================WorkerService======================================================
+ public void schedule(WorkRequest workRequest, long id) {
+        if (stopped) {
+            workRequest.cleanup();
+            return;
+        }
+
+        ScheduledWorkRequest scheduledWorkRequest =
+            new ScheduledWorkRequest(workRequest);
+
+        // If we have a worker thread pool, use that; otherwise, do the work
+        // directly.
+        int size = workers.size();
+        if (size > 0) {
+            try {
+                // make sure to map negative ids as well to [0, size-1]
+                int workerNum = ((int) (id % size) + size) % size;
+                ExecutorService worker = workers.get(workerNum);
+                worker.execute(scheduledWorkRequest);
+            } catch (RejectedExecutionException e) {
+                LOG.warn("ExecutorService rejected execution", e);
+                workRequest.cleanup();
+            }
+        } else {
+            // When there is no worker thread pool, do the work directly
+            // and wait for its completion
+            scheduledWorkRequest.run();
+        }
+    }
+//=========================ScheduledWorkRequest==================================
+  @Override
+        public void run() {
+            try {
+                // Check if stopped while request was on queue
+                if (stopped) {
+                    workRequest.cleanup();
+                    return;
+                }
+                workRequest.doWork();
+            } catch (Exception e) {
+                LOG.warn("Unexpected exception", e);
+                workRequest.cleanup();
+            }
+        }
+//=========================CommitProcessor==================================
+  public void doWork() throws RequestProcessorException {
+            try {
+                nextProcessor.processRequest(request);
+            } finally {
+                // If this request is the commit request that was blocking
+                // the processor, clear.
+                currentlyCommitting.compareAndSet(request, null);
+
+                /*
+                 * Decrement outstanding request count. The processor may be
+                 * blocked at the moment because it is waiting for the pipeline
+                 * to drain. In that case, wake it up if there are pending
+                 * requests.
+                 */
+                if (numRequestsProcessing.decrementAndGet() == 0) {
+                    if (!queuedRequests.isEmpty() ||
+                        !committedRequests.isEmpty()) {
+                        wakeup();
+                    }
+                }
+            }
+        }
+    }
+```
+
+
+
+### 2.FinalRequestProcessor 方法 真正写入数据到内存，并且执行watcher机制
+
+```java 
+//=====================FinalRequestProcessor =============================== 
+rc = zks.processTxn(request);
+//========================ZookeeperServer===================================
+   public ProcessTxnResult processTxn(Request request) {
+        return processTxn(request, request.getHdr(), request.getTxn());
+    }
+
+```
+
+
+
+#### 如果是create的话
+
+会将写入内存结果通过NIO发送给客户端
+
+```java 
+//=====================FinalRequestProcessor ===============================  
+case OpCode.create: {
+                lastOp = "CREA";
+                rsp = new CreateResponse(rc.path);
+                err = Code.get(rc.err);
+                break;
+            }
+//======================NettyServerCxn=================================================
+   public void sendResponse(ReplyHeader h, Record r, String tag)
+            throws IOException {
+        if (closingChannel || !channel.isOpen()) {
+            return;
+        }
+        super.sendResponse(h, r, tag);
+        if (h.getXid() > 0) {
+            // zks cannot be null otherwise we would not have gotten here!
+            if (!zkServer.shouldThrottle(outstandingCount.decrementAndGet())) {
+                enableRecv();
+            }
+        }
+    }
+```
+
+
+
+
+
+如果由watch的方法触发watch  getData会将与客户端建立的CxnSocket当作watcher，因此这里会被触发.
+
+sendResponse会将watcher的 消息返回给客户端。
+
+```java 
+    public void process(WatchedEvent event) {
+        ReplyHeader h = new ReplyHeader(-1, -1L, 0);
+        if (LOG.isTraceEnabled()) {
+            ZooTrace.logTraceMessage(LOG, ZooTrace.EVENT_DELIVERY_TRACE_MASK,
+                                     "Deliver event " + event + " to 0x"
+                                     + Long.toHexString(this.sessionId)
+                                     + " through " + this);
+        }
+
+        // Convert WatchedEvent to a type that can be sent over the wire
+        WatcherEvent e = event.getWrapper();
+
+        try {
+            sendResponse(h, e, "notification");
+        } catch (IOException e1) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Problem sending to " + getRemoteSocketAddress(), e1);
+            }
+            close();
+        }
+    }
+```
+
+
+
+#### 如果是getData命令的话
+
+```
+getDataRequest.getWatch() ? cnxn : null)
+```
+
+如果 请求带有watcher的话，会将watch 加入到watchTable  这里的watch实际是与客户端建立的socket
+
+```java 
+//=======================FinalRequestProcessor=============================================
+case OpCode.getData: {
+                lastOp = "GETD";
+                GetDataRequest getDataRequest = new GetDataRequest();
+                ByteBufferInputStream.byteBuffer2Record(request.request,
+                        getDataRequest);
+                DataNode n = zks.getZKDatabase().getNode(getDataRequest.getPath());
+                if (n == null) {
+                    throw new KeeperException.NoNodeException();
+                }
+                PrepRequestProcessor.checkACL(zks, zks.getZKDatabase().aclForNode(n),
+                        ZooDefs.Perms.READ,
+                        request.authInfo);
+                Stat stat = new Stat();
+                byte b[] = zks.getZKDatabase().getData(getDataRequest.getPath(), stat,
+                        getDataRequest.getWatch() ? cnxn : null);
+                rsp = new GetDataResponse(b, stat);
+                break;
+            }
+//====================DataTree================================
+   public byte[] getData(String path, Stat stat, Watcher watcher)
+    throws KeeperException.NoNodeException {
+        return dataTree.getData(path, stat, watcher);
+    }
+//====================DataTree======================================
+    public byte[] getData(String path, Stat stat, Watcher watcher)
+            throws NoNodeException {
+        DataNode n = nodes.get(path);
+        if (n == null) {
+            throw new NoNodeException();
+        }
+        synchronized (n) {
+            n.copyStat(stat);
+            if (watcher != null) {
+                dataWatches.addWatch(path, watcher);
+            }
+            return n.data;
+        }
+    }
+
+```
 
 
 

@@ -1,16 +1,238 @@
-1. Class文件结构<br/>
-1.1 魔数 表明Class文件类型<br>
-1.2 版本号 主版本号 次版本号<br>
-1.3 常量池长度
-1.4 常量池 [相关资料连接](https://www.jianshu.com/p/68520593b999 "")
-1.5 access_flag
-1.6 interface
-1.7 method 里面有code 里面具体的内容指向常量池 例如一些机器指令  
+#一、Java类加载
+
+##A，JVM类加载过程
+
+1.java 命令调用JDK c++ c代码，启动JVM
+
+2.c++代码 创建BootStrapClassLoader 
+
+3.BootStrapClassLoader 加载 java的Launcher类，创建Launcher对象。
+
+4.Laucher 对象 加载ExtClassLoader ，以及AppClassLoaer 并且设置App的parent为Ext 其他继承ClassLoader的类的parent都为App
+
+5.类加载器加载完成之后，laucher会调用getClassLoader 也就是AppClassLoader。AppClassLoader会调用自己的loadClass方法  加载main方法所在的类，
+
+6.加载main方法所在类完成之后，JVM会调用程序的Main方法。
+
+7.main方法运行结束，JVM销毁。
+
+
+
+## B，ClassLoader loadClass方法详解
+
+1.加载
+
+将class文件由磁盘记载到内存，生成代表这个类的Class对象。
+
+2.验证
+
+校验class文件格式的规范，看是否能被解析。
+
+3.准备
+
+给类的静态变量分配内存，并赋予默认值
+
+4.解析
+
+将符号引用替换为静态引用，将静态方法的符号引用 替换为指向该方法的内存指针。也叫静态链接。
+
+**符号引用：java编译器 将java源码编译为class 假设引用到别的类或者别的类的方法，编译之后，直接用一个字面量代替，之后，通过这个字面量，能正确找到在内存中的直接引用即可**
+
+5.初始化
+
+对类的静态变量初始化为指定值，并且执行静态代码块。
+
+
+
+## C, 类加载的双亲委派机制
+
+
+
+1.调用底层类加载器的 loadClass方法。ClassLoader的loadClass方法，先会从当前类加载器已加载的类集合中去检索是否有该类。如果有，直接返回，如果没有。
+
+2.如果没有，继续往上一级类加载器已加载的类集合中查找，如果一直找不到直至BootStrapClassLoader.也找不到。
+
+3.开始用BootClassLoader 调用类加载的finalClass方法 从自己的类路径开始加载，如果找到，直接返回。
+
+4.如果没有找到，依次用下一级类加载器加载。如果最终找不到，抛出ClassNotFound异常。
+
+
+
+**为什么要设计双亲委派机制？**
+
+1.考虑安全。沙箱机制防止核心类库被 别人恶意替代。
+
+2.防止类被重复加载，提升效率。保证加载类的唯一性。
+
+
+
+
+
+**<font color='yellow' >同一个JVM内，两个相同包名和类名的类对象可以共存，因为他们的类加载器可以不一 样，所以看两个类对象是否是同一个，除了看类的包名和类名是否都相同之外，还需要他们的类 加载器也是同一个才能认为他们是同一个。</font>**
+
+
+
+
+
+
+
+# 二、对象的创建
+
+## A，对象的创建过程
+
+1.类检查
+
+判断常量池是否有这个类的符号引用，以及这个类是否被加载。解析。初始化。如果没有执行相应的类加载过程
+
+
+
+2.分配内存
+
+类检查确定对象需要分配的内存。从堆上划分一块内存给对象。
+
+**问题**
+
+1.如果划分内存？
+
+指针碰撞，直接往空闲空间移动相应的位移 ，如果堆不规整，那么就无法分配。
+
+空闲列表：将所有空闲空间记录到一个列表。按列表分配空间
+
+
+
+2.并发情况下，如何防止内存区域的并发冲突。
+
+1.CAS分配
+
+2.TLAB 堆上，每个线程预先分配一块自己 的专属内存。只存放属于当前线程执行过程中的对象。
+
+
+
+
+
+3.初始化
+
+将对象的属性分配为初始值。
+
+
+
+
+
+4.设置对象头
+
+给对象头填充值，如对象的类型指针，分代年龄。是否偏向锁。锁状态，对象的hashCode
+
+
+
+5.执行<init>方法
+
+赋予对象属性指定的值。
+
+
+
+
+
+## B，对象在栈上分配
+
+###1.逃逸分析。
+
+JVM开启进行逃逸分析的参数后 -DoEscapeAnalysis 之后，JVM对对象的作用域范围确定，并且只在当前方法被引用的对象，会判断该对象没有逃逸。会将此对象进行标量替换。让其在栈上分配空间。随着方法的结束，销毁对象。
+
+
+
+
+
+###2.标量替换
+
+JVM开启标量替换的参数之后 -XX:+EliminateAllocations ，JVM会将未进行逃逸的对象的属性拆分，拆成一个个基本数据类型，存放在栈上。解决因为栈上没有连续大空间存放一个完整的对象的问题。
+
+
+
+<font color='yellow'>对象在栈上分配空间依赖 逃逸分析，标量替换。</font>
+
+
+
+## C，转移到老年代的对象
+
+### 1.大对象提前进入老年代
+
+-XX:PretenureSizeThreshold
+
+**为什么要这样**
+
+大对象直接放入老年代 避免因为大对象复制 而浪费很多的时间。
+
+
+
+
+
+### 2.长期存活的对象进入老年代。
+
+-XX:MaxTenuringThreshold
+
+当一个对象经历过一次YGC仍然存活，并且仍然放置在survior区域，他的分代年龄将+1  对象头里的4为bit，最大15.
+
+当年龄超过设定的指定阈值，那么这样的对象移动到老年代。
+
+
+
+
+
+### 3.对象的动态年龄判断
+
+-XX:TargetSurvivorRatio
+
+如果年龄1 年2------年龄n的对象总和超过了设定的参数比例，那么大于年龄n的其余对象，会直接进入老年代。
+
+其实希望大于等于年龄n的剩余对象是长期存活的对象。
+
+
+
+
+
+### 4.老年代的动态担保机制
+
+“-XX:-HandlePromotionFailure
+
+1.每次minorGC之前，JVM都会统计老年代可用空间的大小。还会统计每次MinorGC进入老年代对象的平均大小。
+
+2.如果有这个参数，那么JVM在MinorGC之前比对 进入老年代对象的平均大小 和 老年代的可用空间大小。如果大于，那么触发FGC ，如果没设置，也FGC。如果FGC后仍大于，那么发生OOM。
+
+3.如果设置了参数或者小于，那么会进行MinorGC.如果Minor后仍然大于，那么触发FGC。
+
+
+
+
+
+## D.如何判断一个类是无用的类？
+
+1.该类的所有实例被回收。
+
+2.加载该类的ClassLoader被回收。
+
+3.该类对象的Class对象没有在任何地方被引用。
+
+
+
+ 
+
+
+
+#三、Class文件结构
+
+1. Class文件结构
+  1.1 魔数 表明Class文件类型
+  1.2 版本号 主版本号 次版本号
+  1.3 常量池长度
+  1.4 常量池 [相关资料连接](https://www.jianshu.com/p/68520593b999 "")
+  1.5 access_flag
+  1.6 interface
+  1.7 method 里面有code 里面具体的内容指向常量池 例如一些机器指令  
 ```java 
 aload_0//等等
 ```
 
-2. 常量池<br/> 
+2. 常量池<br/>
 2.1 tag 表明是什么数据类型的  
 2.2 cp_info里面具体的结构 里面有utf-8(存储所有字符串) info method-info 字符串二进制存储等等一堆数值
 3. Class文件加载机制<br/>
@@ -223,25 +445,11 @@ https://blog.csdn.net/Saintyyu/article/details/108295657
 
 
 
-# 5.JAVA 强软弱虚引用以及引用队列
-
-##### 1.强引用  Object o=new Object(); 只要一直被引用，那么GC不会回收此对象
-
-##### 2.软应用SoftReference 当JAVA内存不足OOMs触发GC时，GC会将软引用对象回收，不管是否被引用。
-
-##### 3.弱引用WeakReference 当触发GC事件时，GC会回收弱引用对象，不管是否被引用。
-
-TheadLocalMap 的entry的key就是弱引用。ThreadLocal的get() set() remove()将key为null的entry数组位置设为null，断开数组和entry对象的指向，从而方便GC，防止内存泄漏.
-
-WeakHashMap的entry的key也是弱引用.触发GC时会自动将key为null的entry数组位置设为null，断开数组和entry对象的指向。
-
-#####4.虚引用PlatformRefence 实际不存在指向的引用，获取不到实际的引用对象。主要用来监视GC的活动，当一个含有虚引用的对象被GC回收之前，会将此对象的虚引用放入虚引用队列。此时可以做一系列操作。
-
-#####5.引用队列 和软弱虚队列配合使用。当一个含有软，弱，虚引用的对象被GC回收之前，首先会将他们的软，弱，虚引用放入引用队列当中。此时可以通过观察引用队列，得知哪些对象即将被GC回收。从而进行其他的业务逻辑。
 
 
 
-# 6.JAVA RunTime DataSpace  
+
+#五、JAVA运行时数据区
 
 6.1指令集分类 寄存器和栈   JAVA基于栈 
 
@@ -362,13 +570,13 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
-#7. GC
+#六. 垃圾回收算法
 
-##### 7.1 引用计数法
+## A. 引用计数法
 
 无法解决对象的循环依赖问题 对象被引用就加1
 
-##### 7.2 根可达算法：
+##B. 根可达算法：
 
 规定rootObject: 
 
@@ -384,7 +592,7 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
-##### 7.3回收垃圾对象的算法
+## C.回收垃圾对象的算法
 
 1. 标记清除法 将有用对象，垃圾对象标记区分。删除垃圾对象。
 
@@ -396,7 +604,9 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
-##### 7.4 新生代  edon 存放新生对象区域， survior1 ,survior2   8:1:1
+## D. MinorGc过程
+
+**eden,survior1 ,survior2   8:1:1**
 
 1. 当触发MinorGC时,会将edon有用的对象复制到s1当中去,清空edon区。
 
@@ -408,7 +618,7 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
-##### 7.5 老生代 存放来自于新生代的对象 在触发FGC事件时 会回收自身的无用对象
+##E. 老生代 存放来自于新生代的对象 在触发FGC事件时 会回收自身的无用对象
 
 将有用对象，垃圾对象标记区分。删除垃圾对象。将有用对象整理放至到一边.
 
@@ -416,11 +626,15 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
-### 7.6 几种常见的JAVA垃圾回收器
+
+
+#七、垃圾回收算法
 
 
 
-####Serial(JDK1.3.1以前):单线程清理垃圾对象，清理时发生stop the world 即所有的工作线程停止。清理过后在执行工作线程。
+##A,Serial
+
+Serial(JDK1.3.1以前):单线程清理垃圾对象，清理时发生stop the world 即所有的工作线程停止。清理过后在执行工作线程。
 
 1. Serial-正对新生代  使用复制法 
 2. SerialNo针对老年代  使用标记整理法 或者标记清除法(CMS的后背预案)
@@ -429,28 +643,20 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
+##B.Parallel
 
+Parallel:多线程并行处理垃圾对象，清理时发生stop the world ,清理过后在执行工作线程。
 
-####Parallel:多线程并行处理垃圾对象，清理时发生stop the world ,清理过后在执行工作线程。
-
-##### 1.ParallelOld（JDK1.6之后才出现） 针对老年代
+###1.ParallelOld（JDK1.6之后才出现） 针对老年代
 
 1.  JDK1.6及之后用来代替老年代的Serial Old收集器；特别是在Server模式，多CPU的情况下；这样在注重吞吐量以及CPU资源敏感的场景，就有了Parallel Scavenge加Parallel Old收集器的"给力"应用组合；
-
-2. -XX:+UseParallelOldGC  老年代使用ParallelOldGC垃圾回收器
-
-	
-
-#####2.ParallelNew ()针对新生代
-
-1.    在Server模式下，ParNew收集器是一个非常重要的收集器，因为除Serial外，目前只有它能与CMS收集器配合工作， 但在单个CPU环境中，不会比Serail收集器有更好的效果，因为存在线程交互开销。
-2. -XX:+UseParNewGC 新生代会强制使用ParallelNew回收垃圾
-3. 指定使用CMS后会默认使用ParallelNew作为新生代垃圾回收器
-4. -XX:ParallelGCThreads 指定ParallelNew开始回收垃圾线程的数量，默认与CPU数量相同
+2.  -XX:+UseParallelOldGC  老年代使用ParallelOldGC垃圾回收器
 
 
 
-##### 3.Parallel Scavenge 针对新生代
+
+
+###2.Parallel Scaveng
 
 1.   高吞吐量为目标，即减少垃圾收集时间，让用户代码获得更长的运行时间；
 
@@ -464,240 +670,382 @@ invokeDynamic  JVM最难的指令 lambda表达式或者反射或者其他动态�
 
 
 
-#### Concurrent(CMS JDK1.5出现)  :指用户线程与垃圾收集线程同时执行（但不一定是并行的，可能会交替执行）
+## C.Concurrent Mark Sweep
 
-1. 采用标记清除算法，所以容易产生内存碎片
+###1.特征
 
-2.   与用户交互较多的场景,希望系统停顿时间最短，注重服务的响应速度；以给用户带来较好的体验；如常见WEB、B/S系统的服务器上的应用
+1.Concurrent(CMS JDK1.5出现)  :指用户线程与垃圾收集线程同时执行（但不一定是并行的，可能会交替执行）
 
-3. -XX:+UseConcMarkSweepGC 指定使用CMS 老生代收集器
+2.采用标记清除算法，所以容易产生内存碎片
 
-4.  过程   
+3.与用户交互较多的场景,希望系统停顿时间最短，注重服务的响应速度；以给用户带来较好的体验；如常见WEB、B/S系统的服务器上的应用
 
-	4.1 初始标记 stop the world  多线程标记root 对象 
+-XX:+UseConcMarkSweepGC 指定使用CMS 老生代收集器
 
-	4.2 并发标记 不发生stop the world 应用程序继续运行  多线程标记处所有存活对象 垃圾对象
+###2.过程   
 
-	4.3 重新标记  stop  the world 多线程标记处并发标记过程当中后续运行过程产生的垃圾对象
+4.1 初始标记 stop the world  多线程标记root 对象 
 
-	4.4 并发清除 多线程回收所有标记的垃圾对象  
+4.2 并发标记 不发生stop the world 应用程序继续运行  多线程标记处所有存活对象 垃圾对象,这个过程耗时较长。
 
-5. 缺点
+4.3 重新标记  stop  the world 多线程标记处并发标记过程当中后续运行过程产生的垃圾对象 主要用到三色标记里面的增量更新，进行重新标记。
 
-	5.1 内存碎片 
+4.4 并发清除 多线程回收所有标记的垃圾对象  
 
-	5.2 工作线程 GC线程同时运行 占用CPU资源 
+###3.缺点
 
-	5.3 产生浮动垃圾  并发清除时，工作线程产生的新的垃圾 所以需要预留空间   -XX:CMSInitiatingOccupancyFraction  指定预留空间比例
+5.1 内存碎片 
 
-	5.4 当预留空间无法满足程序需要时就会报  Concurrent Mode Failure 
+5.2 工作线程 GC线程同时运行 占用CPU资源 
 
-	此时自动调用SerialOld清理垃圾。可能会产生较长的stop the world
+5.3 产生浮动垃圾  并发清除时，工作线程产生的新的垃圾，只能等待下一次回收。
+
+5.5 如果在并发标记阶段或者并发清理阶段，老年代无法满足对象存储的需要，产生FGC ，那么会产生 Concurrent Mode Failure，此时自动调用SerialOld清理垃圾。可能会产生较长的stop the world
+
+**<font color='yellow'> 所以需要预留空间   -XX:CMSInitiatingOccupancyFraction  指定预留空间比例。让在并发标记时能存储新对象</font>**
+
+
+
+
+
+##D.ParallelNew 针对新生代
+
+1.    在Server模式下，ParNew收集器是一个非常重要的收集器，因为除Serial外，目前只有它能与CMS收集器配合工作， 但在单个CPU环境中，不会比Serail收集器有更好的效果，因为存在线程交互开销。
+2.    -XX:+UseParNewGC 新生代会强制使用ParallelNew回收垃圾
+3.    指定使用CMS后会默认使用ParallelNew作为新生代垃圾回收器
+4.    -XX:ParallelGCThreads 指定ParallelNew开始回收垃圾线程的数量，默认与CPU数量相同
+
+
+
+##E.并发标记算法 三色标记
+
+###1.扫描过程
+
+1.对象的引用以及自身全都扫面完毕，标黑色。
+
+2.对象的引用及其自身扫描了，但是未扫描完毕，标灰色。
+
+3.对象的引用及其自身完全没有扫描，标白色。
+
+回收时，直接回收白色对象。
+
+
+
+### 2.浮动垃圾
+
+1.并发标记过程，并发清除过程产生的新对象，这样的对象全部标记为黑色，本轮不会回收，是浮动垃圾
+
+2.并发标记被扫描过的非垃圾对象，而之后又成为垃圾的对象。
+
+
+
+
+
+###3.漏标
+
+在并发标记阶段为白色对象，但是在工作线程执行期间被灰色对象去掉引用。之后又被黑色对象引用，导致在并发清除时被回收。
+
+![image-20210909205057416](C:\Users\admin\AppData\Roaming\Typora\typora-user-images\image-20210909205057416.png)
+
+### 4.漏标解决方案
+
+#### a,增量更新
+
+如果黑色对象有新的引用对象时，将这个引用收集起来，之后在并发标记结束过后，将有这些引用的黑色对象，重新做一遍Root扫描。
+
+**写屏障实现**
+
+```c++ 
+void post_write_barrier(oop* field, oop new_value) {
+ remark_set.add(new_value); // 记录新引用的对象
+ }
+
+```
+
+
+
+
+
+
+
+#### b,原始快照
+
+在灰色对象要删除指向白色对象的引用关系时，在并发标记结束过后，将这些有删除白色引用的灰色对象 当作Root重新做一遍扫描。这样就能扫描到白色对象。此时可以把这些白色对象标记为黑色对象。把它标记为黑色。目的就是让它成为浮动垃圾。等待下次垃圾回收，看是否是垃圾对象。
+
+
+
+**写屏障实现**
+
+```c++ 
+void pre_write_barrier(oop* field) {
+2 oop old_value = *field; // 获取旧值
+3 remark_set.add(old_value); // 记录原来的引用对象
+4 }
+
+```
+
+
+
+###5.记忆集与卡表
+
+为了解决垃圾回收期间 分代对象的相互引用。
+
+如果新生代有被老年代的对象引用。那么做GC ROOT分析时需要全盘扫描老年代，效率很低。
+
+所以引入记忆集的实现卡表。
+
+把整个老年代分为 一个个卡页 ，一旦一个卡页中存在跨代引用，
+
+卡表的每一个元素代表着对应的一个卡页，
+
+那么卡表的元素变为Dirty. GC扫描时，直接扫描卡表中的脏页，对脏页进行GC Root分析即可。
+
+
+
+
+
+
+
+
+
+
+
+##F. G1垃圾回收器
+
+###1.特征
+
+（JDK1.8出现）:垃圾优先的垃圾回收器
+
+1.采用标记整理法，以及复制算法
+
+2.面向服务端应用，针对具有大内存、多处理器的机器；
+
+ 最主要的应用是为需要低GC延迟，并具有大堆的应用程序提供解决方案；
+
+   如：在堆大小约6GB或更大时，可预测的暂停时间可以低于0.5秒；
+
+G1独有概念
+
+2.1 region G1把内存分为多个不能连续的region 每个region可以是空白区， eden,survivor,old,humorous,用于存放指定年代的对象，空白区可以被用于任何类型的区域
+
+2.2 CollectedSet  可以回收垃圾的集合 保存需要进行垃圾回收的region的集合
+
+2.3 RememberedSet:当前region用来存放别的region对于当前region引用的集合，每个region都有
+
+2.4 -XX:+UseG1GC 采用G1垃圾回收器  -XX:+G1HeapRegionSize1M 设定region的大小
+
+2.5G1 有H区域专门用来存放大对象。FullGC的时候会将H区一并回收。
+
+
+
+###2.过程
+
+1.初始标记（initial mark，STW）：暂停所有的其他线程，并记录下gc roots直接能引用的对象，速度很快 ； 
+
+2.并发标记（Concurrent Marking）：同CMS的并发标记 最终标记（Remark，STW）：
+
+3.同CMS的重新标记 
+
+4.筛选回收（Cleanup，STW）：筛选回收阶段首先对各个Region的回收价值和成本进行排序，根据用户所期 望的GC停顿时间(可以用JVM参数 -XX:MaxGCPauseMillis指定)来制定回收计划，比如说老年代此时有1000个 Region都满了，但是因为根据预期停顿时间，本次垃圾回收可能只能停顿200毫秒，那么通过之前回收成本计算得 知，可能回收其中800个Region刚好需要200ms，那么就只会回收800个Region(Collection Set，要回收的集 合)，尽量把GC导致的停顿时间控制在我们指定的范围内。这个阶段其实也可以做到与用户程序一起并发执行，但 是因为只回收一部分Region，时间是用户可控制的，而且停顿用户线程将大幅提高收集效率。不管是年轻代或是老 年代，回收算法主要用的是复制算法，将一个region中的存活对象复制到另一个region中，这种不会像CMS那样 回收完因为有很多内存碎片还需要整理一次，G1采用复制算法回收几乎不会有太多内存碎片。(注意：CMS回收阶 段是跟用户线程一起并发执行的，G1因为内部实现太复杂暂时没实现并发回收，不过到了Shenandoah就实现了并 发收集，Shenandoah可以看成是G1的升级版本)
+
+
+
+
+
+
+
+
+
+3.1  YGC 
+
+触发条件：当G1判断YGC的STW时间远远小于  -XX:MaxGCPauseMills 设定的值，那么不会会继续使用Region区存放对象，否则进行YGC。
+
+1. 阶段1：根扫描
+	静态和本地对象被扫描
+
+2. 阶段2：更新RS
+	处理dirty card队列更新RS
+
+3. 阶段3：处理RS
+	检测从年轻代指向年老代的对象
+
+4. 阶段4：对象拷贝
+	拷贝存活的对象到survivor/old区域
+
+5. 阶段5：处理引用队列
+	软引用，弱引用，虚引用处理 
 
 	
 
 	
 
-	#### G1垃圾回收器 （JDK1.8出现）:垃圾优先的垃圾回收器
+ 3.2  MIXGC
 
-	1. 采用标记整理法，以及复制算法
-	
-	2.    面向服务端应用，针对具有大内存、多处理器的机器；
-	
-		   最主要的应用是为需要低GC延迟，并具有大堆的应用程序提供解决方案；
-	
-		   如：在堆大小约6GB或更大时，可预测的暂停时间可以低于0.5秒；
-	
-	3. G1独有概念
-	
-		2.1 region G1把内存分为多个不能连续的region 每个region可以是空白区， eden,survivor,old,humorous,用于存放指定年代的对象，空白区可以被用于任何类型的区域
-	
-		2.2 CollectedSet  可以回收垃圾的集合 保存需要进行垃圾回收的region的集合
-	
-		2.3 RememberedSet:当前region用来存放别的region对于当前region引用的集合，每个region都有
-	
-		2.4 -XX:+UseG1GC 采用G1垃圾回收器  -XX:+G1HeapRegionSize1M 设定region的大小
-	
-	4. 过程
-	
-		3.1  YGC
-	
-		1. 阶段1：根扫描
-			静态和本地对象被扫描
-	
-		2. 阶段2：更新RS
-			处理dirty card队列更新RS
-	
-		3. 阶段3：处理RS
-			检测从年轻代指向年老代的对象
-	
-		4. 阶段4：对象拷贝
-			拷贝存活的对象到survivor/old区域
-	
-		5. 阶段5：处理引用队列
-			软引用，弱引用，虚引用处理 
-	
-			
-	
-			
-	
-		 3.2  MIXGC
-	
-		1. 初始标记，与 cms一样，多线程并发标记Root 对象 STW
-	
-		2. 并发标记 与 cms一样 不发生STW ,多线程并发标记有用对象，垃圾对象
-	
-		3. 重新标记 与 cms一样发生STW，多线程并发标记未完成的标记
-	
-		4. 并发清除 与 cms一样，多线程 复制存活对象，清除垃圾对象
-	
-			
-	
-		3.3 FGC
-	
-		 当G1 MIXGC失败后，那么久采用SerialNo进行FGC
-	
-	
-	
-	
-	
-	#### CMS与G1对于三色标记法问题采用的解决方案
-	
-	1. CMS,G1都采用三色标记算法，来进行多次标记的 黑色（自身，自身属性完全被扫描的）白色（未被扫描）  灰色（自身扫描完成，自身属性未被扫描）
-	
-	2. 三色标记算法，会产生一个问题，就是白色标记对象，有可能在工作线程执行过程，未被扫描到，但是却被别的存活对象引用到。
-	
-	3. CMS这种采用增量算法，就是对于所有黑色对象进行重新扫描,再次标记.
-	
-	4. G1采用STAB 将所有白色标记对象存在栈中，重新标记过程，再次扫描标记所有白色对象 
-	
-		
-	
-	 
-	
-	
-	
-	
-	
-	##  8.排查GC问题,优化JVM
-	
-	 #### 8.1 JVM常用启动参数
-	
-	 -Xms 最小内存
-	
-	-Xmx 最大内存
-	
-	-Xmn 年轻代大小
-	
-	
-	
-	-XX:+PrintGCDetails
-	
-	-XX:+PrintGCTimeStamps
-	
-	-XX:+PrintGCCauses
-	
-	
-	
-	-XX:+PrintFlagsInitial  默认参数值
-	
-	-XX:+PrintFlagsFinal 最终参数值
-	
-	
-	
-	
-	
-	
-	
-	 -Xloggc:/opt/xxx/logs/xxx-xxx-gc-%t.log  指定日志文件位置名称
-	
-	-XX:+UseGCLogFileRotation  开始日志循环记录 
-	
-	-XX:NumberOfGCLogFiles=5  设定GC日志的总量
-	
-	-XX:GCLogFileSize=20M  设定单个GC日志大小
-	
-	
-	
-	#### 8.2 JVM问题排查命令
-	
-	1. linux  top   查看所有进程资源消耗   -p [pid] 查看指定进程情况   H查看 进程内线程情况
-	
-	2. jdk  jstack [pid]  查看指定java 进程的线程执行情况  tid java线程的threadId  nid 内核线程Id prio java thread的优先级   os_prio 内核线程的优先级
-	
-	3. jinfo  [pid]   查看java进程 JVM的参数配置
-	
-		
-		
-	4. jstat -gc [pid]  [1000]ms  每个1000毫秒动态展示GC使用情况
-	
-		S0C：第一个幸存区的大小
-		S1C：第二个幸存区的大小
-		S0U：第一个幸存区的使用大小
-		S1U：第二个幸存区的使用大小
-		EC：伊甸园区的大小
-		EU：伊甸园区的使用大小
-		OC：老年代大小
-		OU：老年代使用大小
-		MC：方法区大小
-		MU：方法区使用大小
-		CCSC:压缩类空间大小
-		CCSU:压缩类空间使用大小
-		YGC：年轻代垃圾回收次数
-		YGCT：年轻代垃圾回收消耗时间
-		FGC：老年代垃圾回收次数
-		FGCT：老年代垃圾回收消耗时间
-		GCT：垃圾回收消耗总时间
-	
-	5. jmap -histo  [pid]  统计该进程所对象的大小
-	
-	6. jmap -dump:format=b,file=[]  [pid]
-	
-	7. jmap -heap [pid]  查看进程堆内存的大小
-	
-	8.  -XX:+HeapDumpOnOutOfMemoryError  进程Dump时，自动生成一个Dump文件,不指定位置的话那么会存放在classPath的目录下
-	
-	9.  jhat -J-mx100M  [dump文件名]  会启动一个http服务 访问他可以查询dump时的JVM内存情况,可以执行OQL语句 来查询具体对象的数量及详细信息.
-	
-	10. jconsole/jvisualvm 远程连接解决问题,前提设置通过JMX协议，需要监控的进程启动参数设置如下
-	
-	  ```shell
-	  java 
-	  -Djava.rmi.server.hostname=192.168.147.129
-	  -Dcom.sun.management.jmxremote 
-	  -Dcom.sun.management.jmxremote.port=11111 
-	  -Dcom.sun.management.jmxremote.authenticate=false 
-	  -Dcom.sun.management.jmxremote.ssl=false 
-	  ```
-	
-	
-	
-	11. arthas在线排查
-	
-		1. jvm 查看进程 JVM相关信息
-		2. thread 显示该进程内相关线程信息
-		3. dashboard  观察系统相关情况
-		4. heapdump 导出进程堆dump文件，之后使用jhat 命令可以进行分析
-		5. jad 反编译类文件
-		6. redefine  [class文件] 项目热部署 有条件限制 只能改方法实现  不能改方法名
-		7. sc  [类名] 查找类文件
-		8. watch [方法名]  -b -s "{params,returnObject}"  监控方法 执行参数，返回对象
-		
-		
-		
-		
-		
-		
-		
-		
-		
-		
-	
-	
-	
-	
-	
-	
+触发条件：当老年代的堆占有率达到指定参数-XX:InitiatingHeapOccupancyPercent，那么会回收所有新生代，和部分老年代（根据回收的预测时间来确定回收的优先顺序）。采用复制算法，将存活的对象复制到空的region区域。如果不够了，触发一次FullGC
+
+
+
+1. 初始标记，与 cms一样，多线程并发标记Root 对象 STW
+
+2. 并发标记 与 cms一样 不发生STW ,多线程并发标记有用对象，垃圾对象
+
+3. 重新标记 与 cms一样发生STW，多线程并发标记未完成的标记
+
+4. 清除 与 cms一样，多线程 复制存活对象，清除垃圾对象
+
+	
+
+3.3 FGC
+
+ 当G1 MIXGC失败后，那么久采用SerialNo进行FGC
+
+
+
+
+
+###3. CMS与G1对于三色标记法问题采用的解决方案
+
+1. CMS,G1都采用三色标记算法，来进行多次标记的 黑色（自身，自身属性完全被扫描的）白色（未被扫描）  灰色（自身扫描完成，自身属性未被扫描）
+
+2. 三色标记算法，会产生一个问题，就是白色标记对象，有可能在工作线程执行过程，未被扫描到，但是却被别的存活对象引用到。
+
+3. CMS这种采用增量算法，就是对于所有黑色对象进行重新扫描,再次标记.
+
+4. G1采用STAB 将所有白色标记对象存在栈中，重新标记过程，再次扫描标记所有白色对象 
+
+	
+
+### 4.为什么CMS用增量更新，G1用STAB?
+
+1.增量更新会重新扫描，而G1使用了大量的Region区域，做重新GC Root扫描，跨区域，代价较高。
+
+虽然STAB会产生浮动垃圾，但是G1本身就会产生浮动垃圾，直接放到下次垃圾回收时处理就好。
+
+2.CMS就一块老年代区域，重新Root扫描，代价也不高。但是CMS本身也会产生浮动垃圾，如果浮动垃圾过多。导致下一次GC，老年代不够分配的，再次产生FGC的话，Concurrent Mode Fail的话，那么效率极低。
+
+
+
+
+
+#  八，排查GC问题,优化JVM
+
+#### 8.1 JVM常用启动参数
+
+ -Xms 最小内存
+
+-Xmx 最大内存
+
+-Xmn 年轻代大小
+
+
+
+-XX:+PrintGCDetails
+
+-XX:+PrintGCTimeStamps
+
+-XX:+PrintGCCauses
+
+
+
+-XX:+PrintFlagsInitial  默认参数值
+
+-XX:+PrintFlagsFinal 最终参数值
+
+
+
+
+
+
+
+ -Xloggc:/opt/xxx/logs/xxx-xxx-gc-%t.log  指定日志文件位置名称
+
+-XX:+UseGCLogFileRotation  开始日志循环记录 
+
+-XX:NumberOfGCLogFiles=5  设定GC日志的总量
+
+-XX:GCLogFileSize=20M  设定单个GC日志大小
+
+
+
+#### 8.2 JVM问题排查命令
+
+1. linux  top   查看所有进程资源消耗   -p [pid] 查看指定进程情况   H查看 进程内线程情况
+
+2. jdk  jstack [pid]  查看指定java 进程的线程执行情况  tid java线程的threadId  nid 内核线程Id prio java thread的优先级   os_prio 内核线程的优先级
+
+3. jinfo  [pid]   查看java进程 JVM的参数配置
+
+	
+	
+4. jstat -gc [pid]  [1000]ms  每个1000毫秒动态展示GC使用情况
+
+	S0C：第一个幸存区的大小
+	S1C：第二个幸存区的大小
+	S0U：第一个幸存区的使用大小
+	S1U：第二个幸存区的使用大小
+	EC：伊甸园区的大小
+	EU：伊甸园区的使用大小
+	OC：老年代大小
+	OU：老年代使用大小
+	MC：方法区大小
+	MU：方法区使用大小
+	CCSC:压缩类空间大小
+	CCSU:压缩类空间使用大小
+	YGC：年轻代垃圾回收次数
+	YGCT：年轻代垃圾回收消耗时间
+	FGC：老年代垃圾回收次数
+	FGCT：老年代垃圾回收消耗时间
+	GCT：垃圾回收消耗总时间
+
+5. jmap -histo  [pid]  统计该进程所对象的大小
+
+6. jmap -dump:format=b,file=[]  [pid]
+
+7. jmap -heap [pid]  查看进程堆内存的大小
+
+8.  -XX:+HeapDumpOnOutOfMemoryError  进程Dump时，自动生成一个Dump文件,不指定位置的话那么会存放在classPath的目录下
+
+9.  jhat -J-mx100M  [dump文件名]  会启动一个http服务 访问他可以查询dump时的JVM内存情况,可以执行OQL语句 来查询具体对象的数量及详细信息.
+
+10. jconsole/jvisualvm 远程连接解决问题,前提设置通过JMX协议，需要监控的进程启动参数设置如下
+
+  ```shell
+  java 
+  -Djava.rmi.server.hostname=192.168.147.129
+  -Dcom.sun.management.jmxremote 
+  -Dcom.sun.management.jmxremote.port=11111 
+  -Dcom.sun.management.jmxremote.authenticate=false 
+  -Dcom.sun.management.jmxremote.ssl=false 
+  ```
+
+
+
+11. arthas在线排查
+
+	1. jvm 查看进程 JVM相关信息
+	2. thread 显示该进程内相关线程信息
+	3. dashboard  观察系统相关情况
+	4. heapdump 导出进程堆dump文件，之后使用jhat 命令可以进行分析
+	5. jad 反编译类文件
+	6. redefine  [class文件] 项目热部署 有条件限制 只能改方法实现  不能改方法名
+	7. sc  [类名] 查找类文件
+	8. watch [方法名]  -b -s "{params,returnObject}"  监控方法 执行参数，返回对象
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+
+
+
+
+
+
 
 
 

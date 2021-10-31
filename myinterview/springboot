@@ -1,0 +1,36 @@
+#### 1.springboot的自动配置原理
+
+1.springboot 在SpringBootApplication方法中 createApplicationContext 创建WebContext的构造器中注入CFPP到BeanDefinitionMAP中
+
+
+
+2.prepareContext方法把当前类作为BD放入BeanDeinitionMap当中
+
+
+
+2.springboot  refereshCOntext 即调用ApplicationContext 的referesh方法
+
+在invoke BFPP中会调用CFPP 的BFPP的实现方法。
+
+
+
+3.@SpringBootApplication是一个组合注解。
+
+@ComponentScan 把当前类路径作为类扫描路径。
+
+@SpringBootConfiguration 中包含@Configuration 把当前类作为配置类
+
+@EnableAutoConfiguration 中包含@Import(AutoConfigurationImportSelector.class)  @AutoConfigurationPackage--->@Import(AutoConfigurationPackages.Registrar.class
+
+
+
+AutoConfigurationImportSelector selectImport方法 会加载spring.factories中的全限定类名，所以spring.factories中的类会被当做BD加入到BeanDefinitionMap当中去。从而实现自动配置的功能。
+
+4.其中加载的时候还会根据OnConditional注解以及它的以下组合注解或者execudle条件来过滤不需要加载的类或者条件加载的类
+
+
+
+
+
+#### 2.bootstrap.yml  application.properties的区别？
+

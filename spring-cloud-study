@@ -205,12 +205,13 @@ spring-cloud 默认提供ribbon框架包含丰富的负载均衡策略算法实�
   	
   	```
 
-  	
-
+  
+  ​	
+  
   2. 临时实例的话（Ephemeral模式）DistroConsistencyServiceImpl这个类去实现服务的注册功能
-
-  	它的onPut(key)更新Service对象，它的taskDispatcher.addTask()想其他注册中心同步实例消息.
-
+  
+  	它的onPut(key)更新Service对象，它的taskDispatcher.addTask()向其他注册中心同步实例消息.
+  
   	```java 
   	//====================DistroConsistencyServiceImpl======================
   	public void put(String key, Record value) throws NacosException {
@@ -219,11 +220,11 @@ spring-cloud 默认提供ribbon框架包含丰富的负载均衡策略算法实�
   	    }
   	//==================================================================
   	```
-
+  
   	**DistroConsistencyServiceImpl的准备：**
-
+  
   	@PostConstruct方法调用 定时线程池提交任务notifer
-
+  
   	```java 
   	//=====================**DistroConsistencyServiceImpl===================
   	 @PostConstruct
@@ -446,11 +447,11 @@ spring-cloud 默认提供ribbon框架包含丰富的负载均衡策略算法实�
   	        }
   	    }
   	```
-
+  
    
-
+  
   3.nacos完成自身服务列表变动之后，向其他naocs异步同步变动,一个nacos对应一个TaskSchedule，如果同步失败的话会进行重试。
-
+  
   ```java 
   //DisSerivceImpl 
   public void put(String key, Record value) throws NacosException {
@@ -1862,7 +1863,7 @@ public boolean canPass(Node node, int acquireCount, boolean prioritized) {
 }
 ```
 
-pass方法直接累加获取之前所有时间窗口的请求总量，看是否超过了指定的阈值,如果超过直接抛出FlowException会被StatisticNode捕捉到
+pass方法直接累加获取之前所有时间窗口的请求总量，看是否超过了指定的阈值,<font color='yellow'>如果超过直接抛出FlowException-->BlockException 会被StatisticNode捕捉到</font>
 
 ```java 
     public long pass() {
@@ -2078,11 +2079,1253 @@ protected boolean fromOpenToHalfOpen(Context context) {
 
 
 
-## 5.微服务分布式事务
+# 5.微服务分布式事务
 
-#### 应用实例 Seata
+##A,应用实例 Seata
 
-####1.
+#### 1.客户端环境准备
+
+a,导入SpringCloud-alibaba-seata starter 包
+
+b,resource 下引入registry.conf 配置文件
+
+c,创建undo_log表
+
+
+
+
+
+#### 2.数据源配置
+
+1.使用DataSourceProxy seata的代理数据源 替代自己的数据源（可能会出现循环依赖问题，需要使用exclude=DataSourceAutoConfiguration）
+
+
+
+## B,分布式事务
+
+### 1.两阶段提交的解决
+
+####a.内容
+
+
+
+第一阶段：投票阶段。本地事务管理器执行事务但不提交给事务协调者。
+
+第二阶段：事务协调者收到所有参与者的执行成功，才通知所有的参与者提交事务。
+
+如果有任意参与者第一阶段执行失败。那么通知所有参与者回滚事务。
+
+
+
+
+
+####b.缺点
+
+1.同步阻塞
+
+所有事务参与者在等待其他参与者响应的时候，都处于同步阻塞状态。无法进行其他操作。
+
+
+
+
+
+2.数据不一致。
+
+如果协调者。或者只有部分事务参与者收到了Commit消息。那么部分事务参与者。提交事务。其余没有提交。出现数据不一致现象。
+
+
+
+
+
+#### c.实现方案
+
+1.XA规范的数据库接口
+
+2.
+
+
+
+### 2.TCC
+
+try confirm  cancel
+
+1.try 对资源做系统检测和预留。
+
+2.Confirm阶段
+
+3.Cancel阶段
+
+
+
+
+
+### 3.3阶段提交
+
+1.CanCommit
+
+事务的参与者向事务的协调者发送自己是否可以完成事务。
+
+
+
+2.PreCommit
+
+所有参与者在第一阶段中发送yes，那么就会进入此阶段。
+
+事务参与者接收到这一请求之后，就会进行事务的预提交。并且发送ACK给事务的协调者。
+
+如果其中任意一个事务参与者没有发送响应，那么事务的协调者就会向参与者发送 Abort请求
+
+
+
+
+
+3.doCommit
+
+所有的参与者向在完成PreCommit之后发送给协调者ACK
+
+那么事务的协调者就会向所有参与者发送DoCommit指令。
+
+所有事务的参与者接收到此指令。正式提交事务。
+
+
+
+
+
+###3.RocketMQ 事务消息
+
+1.执行本地事务。生产事务消息到RocketMQ的 QUEUE里面
+
+2.此时消息属于半消息。对于消费者不可见。
+
+
+
+3.当本地事务成功。返回RocketMQ  commitMessage.此时消息对于消费者可见。
+
+Broker对Unknown状态会进行回查。如果生产者返会RollBack那么消息不会让消费者消费。
+
+
+
+
+
+
+
+
+
+##C.源码流程
+
+### I.springboot自动配置机制加载核心类
+
+```properties 
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+io.seata.spring.boot.autoconfigure.SeataAutoConfiguration,\
+```
+
+**<font color='yellow' >SeataAutoConfiguration 创建GlobalTransactionScanner ，这是一个继承AbstractAutoProxyCreator的类属于一个BeanPostProcessor.</font>**
+
+#### 1.创建GlobalTransactionScanner，
+
+它是一个BFPP, 在BFPP的应用阶段wrapIfNecessary方法会被应用到容器中所有的Bean
+
+#### 2.GlobalTransactionalInterceptor 动态代理，代理类增强的方法。
+
+扫描所有GlobalTranstaction注解修饰的方法。进行对应解析。
+
+```java 
+ @Bean
+    @DependsOn({"springApplicationContextProvider", "failureHandler"})
+    @ConditionalOnMissingBean({GlobalTransactionScanner.class})
+    public GlobalTransactionScanner globalTransactionScanner(SeataProperties seataProperties, FailureHandler failureHandler) {
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Automatically configure Seata");
+        }
+
+        return new GlobalTransactionScanner(seataProperties.getApplicationId(), seataProperties.getTxServiceGroup(), failureHandler);
+    }
+//==============================GlobalTransactionScanner===========================
+ protected Object wrapIfNecessary(Object bean, String beanName, Object cacheKey) {
+        try {
+            synchronized (PROXYED_SET) {
+                if (PROXYED_SET.contains(beanName)) {
+                    return bean;
+                }
+                interceptor = null;
+                //check TCC proxy
+                if (TCCBeanParserUtils.isTccAutoProxy(bean, beanName, applicationContext)) {
+                    //TCC interceptor, proxy bean of sofa:reference/dubbo:reference, and LocalTCC
+                    interceptor = new TccActionInterceptor(TCCBeanParserUtils.getRemotingDesc(beanName));
+                    ConfigurationCache.addConfigListener(ConfigurationKeys.DISABLE_GLOBAL_TRANSACTION,
+                        (ConfigurationChangeListener)interceptor);
+                } else {
+                    Class<?> serviceInterface = SpringProxyUtils.findTargetClass(bean);
+                    Class<?>[] interfacesIfJdk = SpringProxyUtils.findInterfaces(bean);
+
+                    if (!existsAnnotation(new Class[]{serviceInterface})
+                        && !existsAnnotation(interfacesIfJdk)) {
+                        return bean;
+                    }
+
+                    if (interceptor == null) {
+                        if (globalTransactionalInterceptor == null) {
+                            globalTransactionalInterceptor = new GlobalTransactionalInterceptor(failureHandlerHook);
+                            ConfigurationCache.addConfigListener(
+                                ConfigurationKeys.DISABLE_GLOBAL_TRANSACTION,
+                                (ConfigurationChangeListener)globalTransactionalInterceptor);
+                        }
+                        interceptor = globalTransactionalInterceptor;
+                    }
+                }
+
+                LOGGER.info("Bean[{}] with name [{}] would use interceptor [{}]", bean.getClass().getName(), beanName, interceptor.getClass().getName());
+                if (!AopUtils.isAopProxy(bean)) {
+                    bean = super.wrapIfNecessary(bean, beanName, cacheKey);
+                } else {
+                    AdvisedSupport advised = SpringProxyUtils.getAdvisedSupport(bean);
+                    Advisor[] advisor = buildAdvisors(beanName, getAdvicesAndAdvisorsForBean(null, null, null));
+                    for (Advisor avr : advisor) {
+                        advised.addAdvisor(0, avr);
+                    }
+                }
+                PROXYED_SET.add(beanName);
+                return bean;
+            }
+        } catch (Exception exx) {
+            throw new RuntimeException(exx);
+        }
+    }
+
+//================================GlobalTransactionalInterceptor==============================
+ public Object invoke(final MethodInvocation methodInvocation) throws Throwable {
+        Class<?> targetClass =
+            methodInvocation.getThis() != null ? AopUtils.getTargetClass(methodInvocation.getThis()) : null;
+        Method specificMethod = ClassUtils.getMostSpecificMethod(methodInvocation.getMethod(), targetClass);
+        if (specificMethod != null && !specificMethod.getDeclaringClass().equals(Object.class)) {
+            final Method method = BridgeMethodResolver.findBridgedMethod(specificMethod);
+            final GlobalTransactional globalTransactionalAnnotation =
+                getAnnotation(method, targetClass, GlobalTransactional.class);
+            final GlobalLock globalLockAnnotation = getAnnotation(method, targetClass, GlobalLock.class);
+            boolean localDisable = disable || (degradeCheck && degradeNum >= degradeCheckAllowTimes);
+            if (!localDisable) {
+                if (globalTransactionalAnnotation != null) {
+                    return handleGlobalTransaction(methodInvocation, globalTransactionalAnnotation);
+                } else if (globalLockAnnotation != null) {
+                    return handleGlobalLock(methodInvocation, globalLockAnnotation);
+                }
+            }
+        }
+        return methodInvocation.proceed();
+    }
+```
+
+
+
+### II,动态代理增强GlobalTransaction 修饰的方法
+
+####1.创建全局事务
+
+```java 
+//=============================GlobalTransactionalInterceptor==================================
+Object handleGlobalTransaction(final MethodInvocation methodInvocation,
+        final GlobalTransactional globalTrxAnno) throws Throwable {
+        boolean succeed = true;
+        try {
+            return transactionalTemplate.execute(new TransactionalExecutor() {
+                @Override
+                public Object execute() throws Throwable {
+                    return methodInvocation.proceed();
+                }
+
+                public String name() {
+                    String name = globalTrxAnno.name();
+                    if (!StringUtils.isNullOrEmpty(name)) {
+                        return name;
+                    }
+                    return formatMethod(methodInvocation.getMethod());
+                }
+
+                @Override
+                public TransactionInfo getTransactionInfo() {
+                    // reset the value of timeout
+                    int timeout = globalTrxAnno.timeoutMills();
+                    if (timeout <= 0 || timeout == DEFAULT_GLOBAL_TRANSACTION_TIMEOUT) {
+                        timeout = defaultGlobalTransactionTimeout;
+                    }
+
+                    TransactionInfo transactionInfo = new TransactionInfo();
+                    transactionInfo.setTimeOut(timeout);
+                    transactionInfo.setName(name());
+                    transactionInfo.setPropagation(globalTrxAnno.propagation());
+                    transactionInfo.setLockRetryInternal(globalTrxAnno.lockRetryInternal());
+                    transactionInfo.setLockRetryTimes(globalTrxAnno.lockRetryTimes());
+                    Set<RollbackRule> rollbackRules = new LinkedHashSet<>();
+                    for (Class<?> rbRule : globalTrxAnno.rollbackFor()) {
+                        rollbackRules.add(new RollbackRule(rbRule));
+                    }
+                    for (String rbRule : globalTrxAnno.rollbackForClassName()) {
+                        rollbackRules.add(new RollbackRule(rbRule));
+                    }
+                    for (Class<?> rbRule : globalTrxAnno.noRollbackFor()) {
+                        rollbackRules.add(new NoRollbackRule(rbRule));
+                    }
+                    for (String rbRule : globalTrxAnno.noRollbackForClassName()) {
+                        rollbackRules.add(new NoRollbackRule(rbRule));
+                    }
+                    transactionInfo.setRollbackRules(rollbackRules);
+                    return transactionInfo;
+                }
+            });
+        } catch (TransactionalExecutor.ExecutionException e) {
+            TransactionalExecutor.Code code = e.getCode();
+            switch (code) {
+                case RollbackDone:
+                    throw e.getOriginalException();
+                case BeginFailure:
+                    succeed = false;
+                    failureHandler.onBeginFailure(e.getTransaction(), e.getCause());
+                    throw e.getCause();
+                case CommitFailure:
+                    succeed = false;
+                    failureHandler.onCommitFailure(e.getTransaction(), e.getCause());
+                    throw e.getCause();
+                case RollbackFailure:
+                    failureHandler.onRollbackFailure(e.getTransaction(), e.getOriginalException());
+                    throw e.getOriginalException();
+                case RollbackRetrying:
+                    failureHandler.onRollbackRetrying(e.getTransaction(), e.getOriginalException());
+                    throw e.getOriginalException();
+                default:
+                    throw new ShouldNeverHappenException(String.format("Unknown TransactionalExecutor.Code: %s", code));
+            }
+        } finally {
+            if (degradeCheck) {
+                EVENT_BUS.post(new DegradeCheckEvent(succeed));
+            }
+        }
+    }
+```
+
+
+
+#### 2.开启全局事务
+
+```java 
+//==================TransactionalTemplate=================================
+public Object execute(TransactionalExecutor business) throws Throwable {
+        // 1. Get transactionInfo
+        TransactionInfo txInfo = business.getTransactionInfo();
+        if (txInfo == null) {
+            throw new ShouldNeverHappenException("transactionInfo does not exist");
+        }
+        // 1.1 Get current transaction, if not null, the tx role is 'GlobalTransactionRole.Participant'.
+        GlobalTransaction tx = GlobalTransactionContext.getCurrent();
+
+        // 1.2 Handle the transaction propagation.
+        Propagation propagation = txInfo.getPropagation();
+        SuspendedResourcesHolder suspendedResourcesHolder = null;
+        try {
+            switch (propagation) {
+                case NOT_SUPPORTED:
+                    // If transaction is existing, suspend it.
+                    if (existingTransaction(tx)) {
+                        suspendedResourcesHolder = tx.suspend();
+                    }
+                    // Execute without transaction and return.
+                    return business.execute();
+                case REQUIRES_NEW:
+                    // If transaction is existing, suspend it, and then begin new transaction.
+                    if (existingTransaction(tx)) {
+                        suspendedResourcesHolder = tx.suspend();
+                        tx = GlobalTransactionContext.createNew();
+                    }
+                    // Continue and execute with new transaction
+                    break;
+                case SUPPORTS:
+                    // If transaction is not existing, execute without transaction.
+                    if (notExistingTransaction(tx)) {
+                        return business.execute();
+                    }
+                    // Continue and execute with new transaction
+                    break;
+                case REQUIRED:
+                    // If current transaction is existing, execute with current transaction,
+                    // else continue and execute with new transaction.
+                    break;
+                case NEVER:
+                    // If transaction is existing, throw exception.
+                    if (existingTransaction(tx)) {
+                        throw new TransactionException(
+                            String.format("Existing transaction found for transaction marked with propagation 'never', xid = %s"
+                                    , tx.getXid()));
+                    } else {
+                        // Execute without transaction and return.
+                        return business.execute();
+                    }
+                case MANDATORY:
+                    // If transaction is not existing, throw exception.
+                    if (notExistingTransaction(tx)) {
+                        throw new TransactionException("No existing transaction found for transaction marked with propagation 'mandatory'");
+                    }
+                    // Continue and execute with current transaction.
+                    break;
+                default:
+                    throw new TransactionException("Not Supported Propagation:" + propagation);
+            }
+
+            // 1.3 If null, create new transaction with role 'GlobalTransactionRole.Launcher'.
+            if (tx == null) {
+                tx = GlobalTransactionContext.createNew();
+            }
+
+            // set current tx config to holder
+            GlobalLockConfig previousConfig = replaceGlobalLockConfig(txInfo);
+
+            try {
+                // 2. If the tx role is 'GlobalTransactionRole.Launcher', send the request of beginTransaction to TC,
+                //    else do nothing. Of course, the hooks will still be triggered.
+                beginTransaction(txInfo, tx);
+
+                Object rs;
+                try {
+                    // Do Your Business
+                    rs = business.execute();
+                } catch (Throwable ex) {
+                    // 3. The needed business exception to rollback.
+                    completeTransactionAfterThrowing(txInfo, tx, ex);
+                    throw ex;
+                }
+
+                // 4. everything is fine, commit.
+                commitTransaction(tx);
+
+                return rs;
+            } finally {
+                //5. clear
+                resumeGlobalLockConfig(previousConfig);
+                triggerAfterCompletion();
+                cleanUp();
+            }
+        } finally {
+            // If the transaction is suspended, resume it.
+            if (suspendedResourcesHolder != null) {
+                tx.resume(suspendedResourcesHolder);
+            }
+        }
+    }
+```
+
+
+
+#### 3.向TC发送全局事务，并获取全局事务xid
+
+使用netty通信 将全局事务信息发送给seata-server,seata-server 端返回全局xid
+
+```java 
+//===========================DefaultGlobalTransaction======================================== 
+public void begin(int timeout, String name) throws TransactionException {
+        if (role != GlobalTransactionRole.Launcher) {
+            assertXIDNotNull();
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Ignore Begin(): just involved in global transaction [{}]", xid);
+            }
+            return;
+        }
+        assertXIDNull();
+        String currentXid = RootContext.getXID();
+        if (currentXid != null) {
+            throw new IllegalStateException("Global transaction already exists," +
+                " can't begin a new global transaction, currentXid = " + currentXid);
+        }
+        xid = transactionManager.begin(null, null, name, timeout);
+        status = GlobalStatus.Begin;
+        RootContext.bind(xid);
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Begin new global transaction [{}]", xid);
+        }
+    }
+
+//=========================DefaultGlobalTransaction============================================
+public void begin(int timeout, String name) throws TransactionException {
+        if (role != GlobalTransactionRole.Launcher) {
+            assertXIDNotNull();
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Ignore Begin(): just involved in global transaction [{}]", xid);
+            }
+            return;
+        }
+        assertXIDNull();
+        String currentXid = RootContext.getXID();
+        if (currentXid != null) {
+            throw new IllegalStateException("Global transaction already exists," +
+                " can't begin a new global transaction, currentXid = " + currentXid);
+        }
+        xid = transactionManager.begin(null, null, name, timeout);
+        status = GlobalStatus.Begin;
+        RootContext.bind(xid);
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Begin new global transaction [{}]", xid);
+        }
+    }
+
+//===========================DefaultTransactionManager====================================
+ public String begin(String applicationId, String transactionServiceGroup, String name, int timeout)
+        throws TransactionException {
+        GlobalBeginRequest request = new GlobalBeginRequest();
+        request.setTransactionName(name);
+        request.setTimeout(timeout);
+        GlobalBeginResponse response = (GlobalBeginResponse) syncCall(request);
+        if (response.getResultCode() == ResultCode.Failed) {
+            throw new TmTransactionException(TransactionExceptionCode.BeginFailed, response.getMsg());
+        }
+        return response.getXid();
+    }
+```
+
+
+
+
+
+### III.seata-server 处理TM发来的全局事务
+
+####1.生成一个xid,返回给客户端
+
+1.netty 对于doGlobalBegin的处理handler DefaultCoordinator.doGlobalBegin.
+
+```JAVA 
+//=====================DefaultCore=========================================
+protected void doGlobalBegin(GlobalBeginRequest request, GlobalBeginResponse response, RpcContext rpcContext)
+        throws TransactionException {
+        response.setXid(core.begin(rpcContext.getApplicationId(), rpcContext.getTransactionServiceGroup(),
+            request.getTransactionName(), request.getTimeout()));
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("Begin new global transaction applicationId: {},transactionServiceGroup: {}, transactionName: {},timeout:{},xid:{}",
+                rpcContext.getApplicationId(), rpcContext.getTransactionServiceGroup(), request.getTransactionName(), request.getTimeout(), response.getXid());
+        }
+    }
+//=====================DefaultCore=========================================
+public String begin(String applicationId, String transactionServiceGroup, String name, int timeout)
+        throws TransactionException {
+        //根据TM请求过来的信息，生成全局GlobalSession对象。
+        GlobalSession session = GlobalSession.createGlobalSession(applicationId, transactionServiceGroup, name,
+            timeout);
+        session.addSessionLifecycleListener(SessionHolder.getRootSessionManager());
+        //开启全局GlobalSession
+        session.begin();
+
+        // transaction start event
+        eventBus.post(new GlobalTransactionEvent(session.getTransactionId(), GlobalTransactionEvent.ROLE_TC,
+            session.getTransactionName(), session.getBeginTime(), null, session.getStatus()));
+
+        return session.getXid();
+    }
+```
+
+
+
+#### 2,将GloBalSession 持久化到本地
+
+根据不同的存储模式，将GloBalSession 持久化到本地
+
+```java 
+//==========================GlobalSession=================================================
+@Override
+    public void begin() throws TransactionException {
+        this.status = GlobalStatus.Begin;
+        this.beginTime = System.currentTimeMillis();
+        this.active = true;
+        for (SessionLifecycleListener lifecycleListener : lifecycleListeners) {
+            lifecycleListener.onBegin(this);
+        }
+    }
+//=============================DataBaseSessionManager=============================
+public void addGlobalSession(GlobalSession session) throws TransactionException {
+        if (StringUtils.isBlank(taskName)) {
+            boolean ret = transactionStoreManager.writeSession(LogOperation.GLOBAL_ADD, session);
+            if (!ret) {
+                throw new StoreException("addGlobalSession failed.");
+            }
+        } else {
+            boolean ret = transactionStoreManager.writeSession(LogOperation.GLOBAL_UPDATE, session);
+            if (!ret) {
+                throw new StoreException("addGlobalSession failed.");
+            }
+        }
+    }
+```
+
+
+
+
+
+### IV.TM获取xid，传递下一个RM
+
+#### 1.绑定xid到请求
+
+
+
+### V.开启本地事务
+
+**注意使用seata的所有数据源都是DataSourceProxy,都会被静态代理，全局事务下的所有本地事务都会使用seata的代理数据源**
+
+#### 1.静态代理
+
+DataProxy数据源  静态代理原本的数据源  
+
+ConnectionProxy 静态代理原本的Connection 连接
+
+PreparestatementProxy 静态代理原本的数据源  
+
+
+
+### 2.Proxy的增强方法逻辑
+
+#### 1.PrestatementProxy增强的execute方法
+
+#####1.生成前后置镜像。绑定全局事务id
+
+增强后的execute方法最终调用到AbstractDMLBaseExecutor.executeAutoCommitFalse方法，它在这里面会进行生成前置镜像SQL，还会生成后置镜像SQL，之后缓存到内存的undo log对象中。
+
+
+
+```java 
+ public boolean execute() throws SQLException {
+        return ExecuteTemplate.execute(this, (statement, args) -> statement.execute());
+    }
+//===============================================================
+ public static <T, S extends Statement> T execute(List<SQLRecognizer> sqlRecognizers,
+                                                     StatementProxy<S> statementProxy,
+                                                     StatementCallback<T, S> statementCallback,
+                                                     Object... args) throws SQLException {
+        if (!RootContext.requireGlobalLock() && BranchType.AT != RootContext.getBranchType()) {
+            // Just work as original statement
+            return statementCallback.execute(statementProxy.getTargetStatement(), args);
+        }
+
+        String dbType = statementProxy.getConnectionProxy().getDbType();
+        if (CollectionUtils.isEmpty(sqlRecognizers)) {
+            sqlRecognizers = SQLVisitorFactory.get(
+                    statementProxy.getTargetSQL(),
+                    dbType);
+        }
+        Executor<T> executor;
+        if (CollectionUtils.isEmpty(sqlRecognizers)) {
+            executor = new PlainExecutor<>(statementProxy, statementCallback);
+        } else {
+            if (sqlRecognizers.size() == 1) {
+                SQLRecognizer sqlRecognizer = sqlRecognizers.get(0);
+                switch (sqlRecognizer.getSQLType()) {
+                    case INSERT:
+                        executor = EnhancedServiceLoader.load(InsertExecutor.class, dbType,
+                                new Class[]{StatementProxy.class, StatementCallback.class, SQLRecognizer.class},
+                                new Object[]{statementProxy, statementCallback, sqlRecognizer});
+                        break;
+                    case UPDATE:
+                        executor = new UpdateExecutor<>(statementProxy, statementCallback, sqlRecognizer);
+                        break;
+                    case DELETE:
+                        executor = new DeleteExecutor<>(statementProxy, statementCallback, sqlRecognizer);
+                        break;
+                    case SELECT_FOR_UPDATE:
+                        executor = new SelectForUpdateExecutor<>(statementProxy, statementCallback, sqlRecognizer);
+                        break;
+                    default:
+                        executor = new PlainExecutor<>(statementProxy, statementCallback);
+                        break;
+                }
+            } else {
+                executor = new MultiExecutor<>(statementProxy, statementCallback, sqlRecognizers);
+            }
+        }
+        T rs;
+        try {
+            rs = executor.execute(args);
+        } catch (Throwable ex) {
+            if (!(ex instanceof SQLException)) {
+                // Turn other exception into SQLException
+                ex = new SQLException(ex);
+            }
+            throw (SQLException) ex;
+        }
+        return rs;
+    }
+
+}
+//========================BaseTransactionalExecutor============================================
+  @Override
+    public T execute(Object... args) throws Throwable {
+        String xid = RootContext.getXID();
+        if (xid != null) {
+            statementProxy.getConnectionProxy().bind(xid);
+        }
+
+        statementProxy.getConnectionProxy().setGlobalLockRequire(RootContext.requireGlobalLock());
+        return doExecute(args);
+    }
+//===========================AbstractDMLBaseExecutor=================================
+  @Override
+    public T doExecute(Object... args) throws Throwable {
+        AbstractConnectionProxy connectionProxy = statementProxy.getConnectionProxy();
+        if (connectionProxy.getAutoCommit()) {
+            return executeAutoCommitTrue(args);
+        } else {
+            return executeAutoCommitFalse(args);
+        }
+    }
+//=========================AbstractDMLBaseExecutor=============================================
+ protected T executeAutoCommitFalse(Object[] args) throws Exception {
+        if (!JdbcConstants.MYSQL.equalsIgnoreCase(getDbType()) && isMultiPk()) {
+            throw new NotSupportYetException("multi pk only support mysql!");
+        }
+        TableRecords beforeImage = beforeImage();
+        T result = statementCallback.execute(statementProxy.getTargetStatement(), args);
+        TableRecords afterImage = afterImage(beforeImage);
+        prepareUndoLog(beforeImage, afterImage);
+        return result;
+    }
+```
+
+
+
+
+
+
+
+```java 
+//====================ConnectionProxy=============================
+public void commit() throws SQLException {
+        try {
+            LOCK_RETRY_POLICY.execute(() -> {
+                doCommit();
+                return null;
+            });
+        } catch (SQLException e) {
+            if (targetConnection != null && !getAutoCommit()) {
+                rollback();
+            }
+            throw e;
+        } catch (Exception e) {
+            throw new SQLException(e);
+        }
+    }
+```
+
+
+
+#### 2.Connection 增强的commit方法
+
+```java 
+public void commit() throws SQLException {
+        try {
+            LOCK_RETRY_POLICY.execute(() -> {
+                doCommit();
+                return null;
+            });
+        } catch (SQLException e) {
+            if (targetConnection != null && !getAutoCommit()) {
+                rollback();
+            }
+            throw e;
+        } catch (Exception e) {
+            throw new SQLException(e);
+        }
+    }
+```
+
+
+
+##### 1.RM 通过RPC注册分支事务
+
+构建netty请求，向seata-server注册分支事务
+
+```java 
+//======================ConnectionProxy==================================
+private void doCommit() throws SQLException {
+        if (context.inGlobalTransaction()) {
+            processGlobalTransactionCommit();
+        } else if (context.isGlobalLockRequire()) {
+            processLocalCommitWithGlobalLocks();
+        } else {
+            targetConnection.commit();
+        }
+    }
+//======================ConnectionProxy==================================
+ private void processGlobalTransactionCommit() throws SQLException {
+        try {
+            register();
+        } catch (TransactionException e) {
+            recognizeLockKeyConflictException(e, context.buildLockKeys());
+        }
+        try {
+            UndoLogManagerFactory.getUndoLogManager(this.getDbType()).flushUndoLogs(this);
+            targetConnection.commit();
+        } catch (Throwable ex) {
+            LOGGER.error("process connectionProxy commit error: {}", ex.getMessage(), ex);
+            report(false);
+            throw new SQLException(ex);
+        }
+        if (IS_REPORT_SUCCESS_ENABLE) {
+            report(true);
+        }
+        context.reset();
+    }
+```
+
+
+
+##### 2.插入undo.log镜像到undo.log表
+
+```java 
+ //==========================ConnectionProxy=======================================
+ try {
+            UndoLogManagerFactory.getUndoLogManager(this.getDbType()).flushUndoLogs(this);
+ //===========================ConnectionProxy======================================
+public void flushUndoLogs(ConnectionProxy cp) throws SQLException {
+        ConnectionContext connectionContext = cp.getContext();
+        if (!connectionContext.hasUndoLog()) {
+            return;
+        }
+
+        String xid = connectionContext.getXid();
+        long branchId = connectionContext.getBranchId();
+
+        BranchUndoLog branchUndoLog = new BranchUndoLog();
+        branchUndoLog.setXid(xid);
+        branchUndoLog.setBranchId(branchId);
+        branchUndoLog.setSqlUndoLogs(connectionContext.getUndoItems());
+
+        UndoLogParser parser = UndoLogParserFactory.getInstance();
+        byte[] undoLogContent = parser.encode(branchUndoLog);
+
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("Flushing UNDO LOG: {}", new String(undoLogContent, Constants.DEFAULT_CHARSET));
+        }
+
+        insertUndoLogWithNormal(xid, branchId, buildContext(parser.getName()), undoLogContent,
+            cp.getTargetConnection());
+    }
+```
+
+
+
+
+
+#### 3.捕捉异常的话
+
+report(false) 在对外抛出异常.使用镜像回滚
+
+```java 
+ catch (Throwable ex) {
+            LOGGER.error("process connectionProxy commit error: {}", ex.getMessage(), ex);
+            report(false);
+            throw new SQLException(ex);
+        }
+
+//==================================================================================
+ private void report(boolean commitDone) throws SQLException {
+        if (context.getBranchId() == null) {
+            return;
+        }
+        int retry = REPORT_RETRY_COUNT;
+        while (retry > 0) {
+            try {
+                DefaultResourceManager.get().branchReport(BranchType.AT, context.getXid(), context.getBranchId(),
+                    commitDone ? BranchStatus.PhaseOne_Done : BranchStatus.PhaseOne_Failed, null);
+                return;
+            } catch (Throwable ex) {
+                LOGGER.error("Failed to report [" + context.getBranchId() + "/" + context.getXid() + "] commit done ["
+                    + commitDone + "] Retry Countdown: " + retry);
+                retry--;
+
+                if (retry == 0) {
+                    throw new SQLException("Failed to report branch status " + commitDone, ex);
+                }
+            }
+        }
+    }
+```
+
+
+
+#### 4.正常的话
+
+正常的继续走正常流程 本地事务提交
+
+```java 
+if (IS_REPORT_SUCCESS_ENABLE) {
+            report(true);
+        }
+```
+
+
+
+
+
+### VI.TC处理RM来注册的分支事务
+
+####1.TC 调用处理分支事务注册的处理Handler
+
+```java 
+@Override
+    protected void doBranchRegister(BranchRegisterRequest request, BranchRegisterResponse response,
+                                    RpcContext rpcContext) throws TransactionException {
+        response.setBranchId(
+            core.branchRegister(request.getBranchType(), request.getResourceId(), rpcContext.getClientId(),
+                request.getXid(), request.getApplicationData(), request.getLockKey()));
+    }
+```
+
+
+
+#### 2.TM 获取全局锁
+
+如果成功拿到全局锁，那么会注册分支事务。中途发生异常也会释放全局锁。成功之后，数据库 表中保存分支事务相关信息，并且返回给客户端分支事务ID。
+
+如果没有则会注册失败。
+
+```java 
+{
+            globalSessionStatusCheck(globalSession);
+            globalSession.addSessionLifecycleListener(SessionHolder.getRootSessionManager());
+            BranchSession branchSession = SessionHelper.newBranchByGlobal(globalSession, branchType, resourceId,
+                    applicationData, lockKeys, clientId);
+            branchSessionLock(globalSession, branchSession);
+            try {
+                globalSession.addBranch(branchSession);
+            } catch (RuntimeException ex) {
+                branchSessionUnlock(branchSession);
+                throw new BranchTransactionException(FailedToAddBranch, String
+                        .format("Failed to store branch xid = %s branchId = %s", globalSession.getXid(),
+                                branchSession.getBranchId()), ex);
+            }
+            if (LOGGER.isInfoEnabled()) {
+                LOGGER.info("Register branch successfully, xid = {}, branchId = {}, resourceId = {} ,lockKeys = {}",
+                    globalSession.getXid(), branchSession.getBranchId(), resourceId, lockKeys);
+            }
+            return branchSession.getBranchId();
+        }
+```
+
+
+
+
+
+###VII.TM全局事务处理
+
+#### 1.全局事务成功
+
+提交全局事务
+
+```java 
+//=======================TransactionTemplate===================================== 
+// 4. everything is fine, commit.
+                commitTransaction(tx);
+//======================TransactionTemplate===============================
+ private void commitTransaction(GlobalTransaction tx) throws TransactionalExecutor.ExecutionException {
+        try {
+            triggerBeforeCommit();
+            tx.commit();
+            triggerAfterCommit();
+        } catch (TransactionException txe) {
+            // 4.1 Failed to commit
+            throw new TransactionalExecutor.ExecutionException(tx, txe,
+                TransactionalExecutor.Code.CommitFailure);
+        }
+    }
+//================================================================
+public void commit() throws TransactionException {
+        if (role == GlobalTransactionRole.Participant) {
+            // Participant has no responsibility of committing
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("Ignore Commit(): just involved in global transaction [{}]", xid);
+            }
+            return;
+        }
+        assertXIDNotNull();
+        int retry = COMMIT_RETRY_COUNT <= 0 ? DEFAULT_TM_COMMIT_RETRY_COUNT : COMMIT_RETRY_COUNT;
+        try {
+            while (retry > 0) {
+                try {
+                    status = transactionManager.commit(xid);
+                    break;
+                } catch (Throwable ex) {
+                    LOGGER.error("Failed to report global commit [{}],Retry Countdown: {}, reason: {}", this.getXid(), retry, ex.getMessage());
+                    retry--;
+                    if (retry == 0) {
+                        throw new TransactionException("Failed to report global commit", ex);
+                    }
+                }
+            }
+        } finally {
+            if (xid.equals(RootContext.getXID())) {
+                suspend();
+            }
+        }
+        if (LOGGER.isInfoEnabled()) {
+            LOGGER.info("[{}] commit status: {}", xid, status);
+        }
+    }
+//=======================DefaultTransactionManager=================================
+ public GlobalStatus commit(String xid) throws TransactionException {
+        GlobalCommitRequest globalCommit = new GlobalCommitRequest();
+        globalCommit.setXid(xid);
+        GlobalCommitResponse response = (GlobalCommitResponse) syncCall(globalCommit);
+        return response.getGlobalStatus();
+    }
+```
+
+
+
+#### 2.全局事务失败
+
+#####1.RM 经过RPC 向TC 要求全局事务回滚
+
+```java 
+//====================TransactionTemplate===========================================
+completeTransactionAfterThrowing(txInfo, tx, ex);
+//===================TransactionTemplate====================================
+ private void completeTransactionAfterThrowing(TransactionInfo txInfo, GlobalTransaction tx, Throwable originalException) throws TransactionalExecutor.ExecutionException {
+        //roll back
+        if (txInfo != null && txInfo.rollbackOn(originalException)) {
+            try {
+                rollbackTransaction(tx, originalException);
+            } catch (TransactionException txe) {
+                // Failed to rollback
+                throw new TransactionalExecutor.ExecutionException(tx, txe,
+                        TransactionalExecutor.Code.RollbackFailure, originalException);
+            }
+        } else {
+            // not roll back on this exception, so commit
+            commitTransaction(tx);
+        }
+    }
+//===================TransactionTemplate================================
+ private void rollbackTransaction(GlobalTransaction tx, Throwable originalException) throws TransactionException, TransactionalExecutor.ExecutionException {
+        triggerBeforeRollback();
+        tx.rollback();
+        triggerAfterRollback();
+        // 3.1 Successfully rolled back
+        throw new TransactionalExecutor.ExecutionException(tx, GlobalStatus.RollbackRetrying.equals(tx.getLocalStatus())
+            ? TransactionalExecutor.Code.RollbackRetrying : TransactionalExecutor.Code.RollbackDone, originalException);
+    }
+//=====================DefaultTransactionManager====================================
+public GlobalStatus rollback(String xid) throws TransactionException {
+        GlobalRollbackRequest globalRollback = new GlobalRollbackRequest();
+        globalRollback.setXid(xid);
+        GlobalRollbackResponse response = (GlobalRollbackResponse) syncCall(globalRollback);
+        return response.getGlobalStatus();
+    }
+
+```
+
+
+
+##### 2.RM收到TC 对全局事务回滚的处理通知
+
+```java 
+   @Override
+    public BranchRollbackResponse handle(BranchRollbackRequest request) {
+        BranchRollbackResponse response = new BranchRollbackResponse();
+        exceptionHandleTemplate(new AbstractCallback<BranchRollbackRequest, BranchRollbackResponse>() {
+            @Override
+            public void execute(BranchRollbackRequest request, BranchRollbackResponse response)
+                throws TransactionException {
+                doBranchRollback(request, response);
+            }
+        }, request, response);
+        return response;
+    }
+```
+
+
+
+### VIII. TC全局事务处理
+
+#### 1.全局事务提交
+
+```java 
+//=======================DefaultCoordinator===================================
+
+@Override
+    protected void doGlobalCommit(GlobalCommitRequest request, GlobalCommitResponse response, RpcContext rpcContext)
+        throws TransactionException {
+        response.setGlobalStatus(core.commit(request.getXid()));
+    }
+//=========================DefaultCore======================================
+  public GlobalStatus commit(String xid) throws TransactionException {
+        GlobalSession globalSession = SessionHolder.findGlobalSession(xid);
+        if (globalSession == null) {
+            return GlobalStatus.Finished;
+        }
+        globalSession.addSessionLifecycleListener(SessionHolder.getRootSessionManager());
+        // just lock changeStatus
+
+        boolean shouldCommit = SessionHolder.lockAndExecute(globalSession, () -> {
+            // the lock should release after branch commit
+            // Highlight: Firstly, close the session, then no more branch can be registered.
+            globalSession.closeAndClean();
+            if (globalSession.getStatus() == GlobalStatus.Begin) {
+                globalSession.changeStatus(GlobalStatus.Committing);
+                return true;
+            }
+            return false;
+        });
+        if (!shouldCommit) {
+            return globalSession.getStatus();
+        }
+        if (globalSession.canBeCommittedAsync()) {
+            globalSession.asyncCommit();
+            return GlobalStatus.Committed;
+        } else {
+            doGlobalCommit(globalSession, false);
+        }
+        return globalSession.getStatus();
+    }
+```
+
+
+
+
+
+
+
+#### 2.全局事务回滚
+
+删除本地全局事务相关信息，释放全局锁。
+
+```java 
+//============================DefaultCoordinator================================
+@Override
+    protected void doGlobalCommit(GlobalCommitRequest request, GlobalCommitResponse response, RpcContext rpcContext)
+        throws TransactionException {
+        response.setGlobalStatus(core.commit(request.getXid()));
+    }
+
+//======================DefaultCore==============================================
+    public GlobalStatus commit(String xid) throws TransactionException {
+        GlobalSession globalSession = SessionHolder.findGlobalSession(xid);
+        if (globalSession == null) {
+            return GlobalStatus.Finished;
+        }
+        globalSession.addSessionLifecycleListener(SessionHolder.getRootSessionManager());
+        // just lock changeStatus
+
+        boolean shouldCommit = SessionHolder.lockAndExecute(globalSession, () -> {
+            // the lock should release after branch commit
+            // Highlight: Firstly, close the session, then no more branch can be registered.
+            globalSession.closeAndClean();
+            if (globalSession.getStatus() == GlobalStatus.Begin) {
+                globalSession.changeStatus(GlobalStatus.Committing);
+                return true;
+            }
+            return false;
+        });
+        if (!shouldCommit) {
+            return globalSession.getStatus();
+        }
+        if (globalSession.canBeCommittedAsync()) {
+            globalSession.asyncCommit();
+            return GlobalStatus.Committed;
+        } else {
+            doGlobalCommit(globalSession, false);
+        }
+        return globalSession.getStatus();
+    }
+
+
+//===========================DefaultCore=============================================
+    public GlobalStatus rollback(String xid) throws TransactionException {
+        GlobalSession globalSession = SessionHolder.findGlobalSession(xid);
+        if (globalSession == null) {
+            return GlobalStatus.Finished;
+        }
+        globalSession.addSessionLifecycleListener(SessionHolder.getRootSessionManager());
+        // just lock changeStatus
+        boolean shouldRollBack = SessionHolder.lockAndExecute(globalSession, () -> {
+            globalSession.close(); // Highlight: Firstly, close the session, then no more branch can be registered.
+            if (globalSession.getStatus() == GlobalStatus.Begin) {
+                globalSession.changeStatus(GlobalStatus.Rollbacking);
+                return true;
+            }
+            return false;
+        });
+        if (!shouldRollBack) {
+            return globalSession.getStatus();
+        }
+
+        doGlobalRollback(globalSession, false);
+        return globalSession.getStatus();
+    }
+
+//=========================DefaultCore============================================
+
+    public boolean doGlobalRollback(GlobalSession globalSession, boolean retrying) throws TransactionException {
+        boolean success = true;
+        // start rollback event
+        eventBus.post(new GlobalTransactionEvent(globalSession.getTransactionId(), GlobalTransactionEvent.ROLE_TC,
+            globalSession.getTransactionName(), globalSession.getBeginTime(), null, globalSession.getStatus()));
+
+        if (globalSession.isSaga()) {
+            success = getCore(BranchType.SAGA).doGlobalRollback(globalSession, retrying);
+        } else {
+            for (BranchSession branchSession : globalSession.getReverseSortedBranches()) {
+                BranchStatus currentBranchStatus = branchSession.getStatus();
+                if (currentBranchStatus == BranchStatus.PhaseOne_Failed) {
+                    globalSession.removeBranch(branchSession);
+                    continue;
+                }
+                try {
+                    BranchStatus branchStatus = branchRollback(globalSession, branchSession);
+                    switch (branchStatus) {
+                        case PhaseTwo_Rollbacked:
+                            globalSession.removeBranch(branchSession);
+                            LOGGER.info("Rollback branch transaction successfully, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
+                            continue;
+                        case PhaseTwo_RollbackFailed_Unretryable:
+                            SessionHelper.endRollbackFailed(globalSession);
+                            LOGGER.info("Rollback branch transaction fail and stop retry, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
+                            return false;
+                        default:
+                            LOGGER.info("Rollback branch transaction fail and will retry, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
+                            if (!retrying) {
+                                globalSession.queueToRetryRollback();
+                            }
+                            return false;
+                    }
+                } catch (Exception ex) {
+                    StackTraceLogger.error(LOGGER, ex,
+                        "Rollback branch transaction exception, xid = {} branchId = {} exception = {}",
+                        new String[] {globalSession.getXid(), String.valueOf(branchSession.getBranchId()), ex.getMessage()});
+                    if (!retrying) {
+                        globalSession.queueToRetryRollback();
+                    }
+                    throw new TransactionException(ex);
+                }
+            }
+
+            // In db mode, there is a problem of inconsistent data in multiple copies, resulting in new branch
+            // transaction registration when rolling back.
+            // 1. New branch transaction and rollback branch transaction have no data association
+            // 2. New branch transaction has data association with rollback branch transaction
+            // The second query can solve the first problem, and if it is the second problem, it may cause a rollback
+            // failure due to data changes.
+            GlobalSession globalSessionTwice = SessionHolder.findGlobalSession(globalSession.getXid());
+            if (globalSessionTwice != null && globalSessionTwice.hasBranch()) {
+                LOGGER.info("Rollbacking global transaction is NOT done, xid = {}.", globalSession.getXid());
+                return false;
+            }
+        }
+        if (success) {
+            SessionHelper.endRollbacked(globalSession);
+
+            // rollbacked event
+            eventBus.post(new GlobalTransactionEvent(globalSession.getTransactionId(), GlobalTransactionEvent.ROLE_TC,
+                globalSession.getTransactionName(), globalSession.getBeginTime(), System.currentTimeMillis(),
+                globalSession.getStatus()));
+
+            LOGGER.info("Rollback global transaction successfully, xid = {}.", globalSession.getXid());
+        }
+        return success;
+    }
+
+```
 
 
 
@@ -2311,190 +3554,3 @@ public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
 
 
 
-spring-cloud 服务治理
-eureka
-consul
-zookeeper
-
-==================================================================
-
-==========================spring-cloud 服务消费者的负载均衡=======================================
-1,ribbon
-消费者方法上加上@LoadBanlance注解
-  return restTemplate.getForEntity("http://eureka-provider/", String.class).getBody();
-
-
-2,@FeignClient(value=[实现接口所在应用的spring.application.name 也是向注册中心注册的服务名字])
-
-
-总体说明
-feign消费服务时，以GET方式请求的条件：
-如果想让服务消费者采用GET方式调用服务提供者，那么需要：
-
-服务消费者这边feign调用时，在所有参数前加上@RequestParam注解。
-服务消费者这边feign调用时，指明为GET方式（注:如果不指明method,那么在条件1满足的情况下，采用的是默认的GET方式）。
-注：这里条件1和条件2，是“且”的关系(都满足时，才为GET)。
-
-feign消费服务时，以POST方式请求的条件：
-如果想让服务消费者采用POST方式调用服务提供者，那么只需要：
-
-服务消费者这边feign调用时，在所有参数前加上@RequestParam注解，并指明feign消费服务的方式为POST。
-服务消费者这边feign调用时，有且只有一个参数前为@RequestBody或什么也没有（如果有多个参数，那么其余参数前必须有@RequestParam）。
-注：这里条件1和条件2，是“或”的关系（当至少一个满足时，即为POST）。
-
-注：在服务消费者中，使用feign消费服务时，如果参数前什么也不写，那么默认是由@RequestBody指明的。
-
-即：只要不满足GET方式请求，那么POST方式请求是一定支持的。
-
-下面进行详细说明
-无参：
-服务消费者以GET方式请求消费服务的情况(示例)：
-
-
-
-不指定method,则默认为get，等同于
-
-
-
-服务消费者以POST方式请求消费服务的情况(示例)：
-
-
-
-单参：
-服务消费者以GET方式请求消费服务的情况(示例)：
-
-参数前使用了@RequestParam,且指明了用GET方式
-
-
-
-等同于(当所有参数前都有@RequestParam时，这时不指明method，则默认为采用GET方式)：
-
-
-
-服务消费者以POST方式请求消费服务的情况(示例)：
-
-参数前使用了@RequestParam,且指明了用POST方式
-
-
-参数前未使用@RequestParam或参数前使用了@RequestBody注解(此时不论是否手动指定请求方式、不论指定的方式是POST还是GET，那么最终都以POST方式消费服务)
-
-
-
-
-
-
-
-
-注：在服务消费者中，使用feign消费服务时，如果参数前什么也不写，那么默认是由@RequestBody指明的。
-
-注：@RequestBody注解的参数，需要POST方式才能传递数据。
-
-注：在服务提供者的Controller中，
-
-如果要接收(服务消费中传过来的)被@RequestBody指明的参数，那么对应方法的对应参数前一定要有@RequestBody；(如果没有的话，收到的参数值就为null;如果写成@RequestParam的话，那么feign调用会失败)
-如果要接收(服务消费中传过来的)被@RequestParam指明的参数，那么可以写@RequestParam，也可以不写(当服务提供者中对应的参数名字与服务消费者传过来的参数名字一致时，可以不写，不一致时，需要写)
-多参：
-服务消费者以GET方式请求消费服务的情况(示例)：
-
-如果想让服务消费者采用GET方式调用服务提供者，那么需要：
-
-服务消费者这边feign调用时，在所有参数前加上@RequestParam注解。
-服务消费者这边feign调用时，指明为GET方式（注:如果不指明method,那么在条件1满足的情况下，默认采用的也是GET方式）。
-
-
-等同于
-
-
-
-服务消费者以POST方式请求消费服务的情况(示例)：
-
-       多参数时，如果服务消费者想采用POST进行feign调用，那么：服务消费者中该接口方法里的这些参数前，最多只能有一个参数是@RequestBody指明的，其余的参数必须使用@RequestParam指明。
-
-如:
-
-
-
-等同于（String name 这个参数前什么也不写，那么默认的即为@RequestBody）
-
-
-
-如果服务消费者这边feign调用时,所有参数前面都使用了@RequestParam注解时,但是指明的是POST方式，那么最终还是以POST方式进行的：
-
-
-
-服务提供者接收时：
-如果服务消费者传过来参数时，全都用的是@RequestParam的话，那么服务提供者的Controller中对应参数前可以写@RequestParam,也可以不写(当两边参数名字一致时，可以省略不写)
-如果服务消费者传过来参数时，有@RequestBody的话，那么服务提供者的Controller中对应参数前必须要写@RequestBody(如果是多参数的话，其余参数前视情况可以写@RequestParam,也可以不写)
-       注意：如果接口与接口的实现分别处于两个服务中，那么接口就相当于服务消费者，而接口的实现则相当于服务提供者。两者之间仍然满足本文上所述要求。如：
-
-服务消费者中的接口是这样的：
-
-
-
-那么对应的服务提供者中的Controller应该是这样的：
-
-
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================
-==================================================================

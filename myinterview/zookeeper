@@ -1,0 +1,191 @@
+#### 1.zookeeper是什么？
+
+分布式协调框架，用来解决分布式系统的协调问题
+
+主要功能：
+
+负载均衡
+
+分布式锁
+
+分布式协调通知
+
+集群管理
+
+
+
+#### 2.zookeeper如何保证主从节点的数据同步
+
+zookeeper 一旦选举完成，集群角色确定
+
+
+
+Leader的话：
+
+1.异步线程 开启BIO  ServerSocket 监听同步通信端口。构建Leader对客户端请求的责任链。
+
+2.得到Follower的请求之后，将自身刚刚从事务日志加载到内存的数据通过BIO发送给Follower
+
+3.还会不断发送ping 请求 给Follower 保持长连接。
+
+
+
+leader接收到客户端 写请求，会使用请求责任链模式处理客户端的请求，对于写数据先会写到自身事务日志。给自身发送ACK，之后会同步给其他Follower。把请求放入队列。CommitProcessor 异步线程的run方法会不断 处理队列里的请求。当有半数以上的ACK返回包括（leader自身），会唤醒commitProcessor的异步线程。它会从队列取出请求，同步给observer,再发送commit 给Follower,让Follower也将数据写入内存。
+
+
+
+
+
+如果发生网络分区。leader会重新改变自身状态为LOOKING。 重新加入集群进行选举
+
+
+
+Follower的话 ：
+
+1.主动发起socket 连向Leader .循环读取处理来自Leader的响应.不断接收Leader的数据，构建Follower对请求数据的责任链。
+
+并且同步到自身内存。
+
+2.只有再接收到Leader的Commit命令之后，才会将请求数据真正写入内存。
+
+3.Follower接收到客户端的写请求之后，会转发给leader
+
+
+
+如果发生网络分区。leader会重新改变自身状态为LOOKING。与集权其他节点进行选举。
+
+
+
+
+
+#### 3.客户端注册watch的实现
+
+1.客户端 封装WatchRegitration 放入Packet 序列化 通过NIO发送给服务端
+
+2.如果服务端返回的数据带有watchEvent的话，会把服务端返回的watcher 放入watchSet当中去。
+
+客户端 eventThread异步线程 对一个存放watchEvent的队列进行不断获取,将watch事件分发给WatchSet里的每一个watch对象。调用它的process方法
+
+
+
+
+
+#### 4.服务端watch的实现
+
+1.服务端收到客户端带有watch的请求后，会把它放入watchTable当中去，其存放的此次的SocketCxn
+
+2.服务端leader再执行FinalProcessor 真正将数据变化同步到内存的时候，会遍历watchTable 找到对应的socketCxn，找到后移除wtatch,再将此次变化通过NIO发送给对应的客户端。
+
+
+
+
+
+####5.zookeeper的数据同步
+
+Leader:  
+
+选举过程：构建leader对客户端请求的责任处理链。之后按责任链顺序处理请求。
+
+1.BIO 创建ServerSocekt 监听同步通信端口 accept到所有到来的客户端连接
+
+2.接收到Follower同步请求后，将自身事务日志的数据 BIO发送给Follower.
+
+**<font color='yellow'>a,如果接收到FOLLOWR的FollowerInfo超过半数以上</font>**
+
+**<font color='yellow'>b,发送learnInfo给follower,包括new epoch</font>**
+
+**<font color='yellow'>c,等待follower的ackepoch，包括follower的zxid, epoch</font>**
+
+**<font color='yellow'>d,如果follower的zxid处于leader自身的minzxid~maxzxid之间，发送follower,Diff</font>**
+
+**<font color='yellow'>e,如果follower的zxid大于leader的maxid，发送follower,Trunc</font>**
+
+**<font color='yellow'>f,如果follower的zxid处于leaderx小于minzxid，发送follower,Snap</font>**
+
+**<font color='yellow'>f,如果follower的zxid再leader找不到，比如它是以前leader宕机期间提交的数据 oldepoch+zxid，发送follower, Trunc+Diff</font>**
+
+3.新的数据写入Leader, 先将数据写入自身事务日志，给自身发送ACK消息。
+
+4.再将数据BIO发送给Follower.
+
+5.如果收到集群节点的半数以上的ACK消息。发送Commit 给Follower，让其也将数据写入内存
+
+6.真正将数据写到内存 DataTree上。直至半数以上Commit ACK再发送客户端写成功
+
+
+
+
+
+Follower:
+
+选举过程：构建follower对客户端请求的责任处理链。之后按责任链顺序处理请求。
+
+1.BIO 创建 Socket 通过同步通信端口 与Leader 建立Socket连接。
+
+2.将自身状态发送给leader. 根据leader返回来的消息，判断
+
+**<font color='yellow'>发送FollowerInfo给leader 包括自身epoach  myid</font>**
+
+**<font color='yellow'>收到leader 的new epoch 之后发送ackepoch,包括自身zxid   epoch，等待leader发送同步类型消息</font>**
+
+**<font color='yellow'>如果同步类型是Diff 直接接收leader 的差异部分数据，差异部分的数据采用leader与follower多次的通信来完成，leader发送一次proposal消息，再发一次commit请求。如果commit半数以上，发送update给follower，告诉follower数据是最新的了。完成同步</font>**
+
+**<font color='yellow'>如果同步类型是Trunc 直接回滚自身事务至leader的maxzid</font>**
+
+**<font color='yellow'>如果同步类型是Trunc Diff  先回滚自身事务至leader的maxzid ,再接收差异数据</font>**
+
+**<font color='yellow'>如果同步类型是Snap 直接清空自身，接收leader的全量数据。</font>**
+
+3.建立循环，处理Leader发送来的数据，解码数据，判断数据的类型。根据不同的类型，进行不同的处理。
+
+4.如果是Leader.proposal则将数据写入自身事务日志，再发送ACK给Leader.
+
+5.如果是Leader.commit 则将数据写入自身的内存DateTree上。
+
+
+
+
+
+#### 6.zookeeper如何保证事务的顺序一致性？
+
+1.zookeeper对于每一个事务，维护一个64位的事务ID，高32位表示选举周期，低32位用来表示事务id,每次发生新的事务，事务id自增1.
+
+
+
+
+
+#### 7.zookeepr节点宕机如何处理？
+
+1.如果是leader宕机,会导致follower与leader的连接循环抛出异常，follower与其他follower会清除自身follower,回归looking状态，只要follower存活数量在集群数量半数以上，这样其他follower可以重新选举出leader，对外提供正常服务。
+
+2.如果是follower宕机,其他节点存活的数量，仍然在集群半数以上，那么leader仍然可以写数据，数据不会丢失。整个集群仍然可以对外提供服务。
+
+
+
+#### 8.zookeeper watch的监听是永久的吗？ 
+
+1.客户端对zookeeper节点的监听是一次性的，一旦触发watcher,那么wather就会失效。如果需要维持，那么需要重新添加watch.
+
+为什么不是永久的？
+
+1.很多业务场景不需要对节点维持永久watcher,因此设置一次性的，可以有效节省资源消耗，提升整体性能。
+
+2.永久watcher，服务端需要频繁向客户端通知watcher.给网络和服务器造成很大压力.
+
+
+
+
+
+#### 9.zookeeper的典型使用场景。
+
+1.分布式系统的注册中心
+
+2.分布式锁
+
+3.配置中心。配置比较少的。
+
+
+
+
+
+####8.

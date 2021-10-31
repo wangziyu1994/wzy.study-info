@@ -442,7 +442,7 @@ public Object getObject(Cache cache, CacheKey key) {
 
 1. xml中配置的update 不能清空 @CacheNamespace 中的缓存数据
 
-2. 只有修改会话提交之后 才会执行清空操作
+2. 只有在增删改会话提交之后 才会执行清空操作
 
 3. 任何一种增删改操作 都会清空整个namespace 中的缓存
 

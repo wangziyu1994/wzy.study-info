@@ -2,6 +2,14 @@
 
 1.初始化controller,里面初始化  namesrvserver,nettyserver ，之后启动controller 对外接收Client的请求
 
+a,内部维护所有注册成功的broker 实例列表，客户端请求，会发送实例列表过去。
+
+b,启动定时线程池，执行定时任务与broker发送心跳。如果一定时间没有收到心跳，把broker设为无用状态。
+
+c,启动定时线程池，执行定时任务，定期扫描broker列表，剔除无用状态的broker.
+
+d,nameserver相互之间不通信。
+
 ```java 
 //初始化namesrcController  这是个nettyserver  接收nettyclient的请求
 NamesrvController controller = createNamesrvController(args);
@@ -61,6 +69,10 @@ start(controller);
 
 
 
+
+
+
+
 ### 2.持久化机制
 
 #### 1.同步刷盘
@@ -83,9 +95,9 @@ start(controller);
 
 
 
-###Broker源码流程
+####3.Broker源码流程
 
-
+#####a,初始化网络通信组件
 
 1.初始化controller  ,里面初始化 nettyServer,nettyClient ,之后启动controller ，里面启动nettyserver
 
@@ -135,48 +147,21 @@ start(controller);
 
 
 
+##### b,初始化基础业务功能组件
+
+​	MessageStore 加载磁盘文件到内存
+
+   ProducerManager 管理producer的组件 等等。。。
+
+
+
+
+
 
 
 ##3.RocketMQ-Consumer
 
-
-
-
-
-###1.RocketMQ消费者源码流程
-
-##### 1.初始化DefaultPushConsumer---->初始化了DefaultMQPushConsumerImpl
-
-#####2. **defaultPullConsumer.start()--------->this.defaultMQPullConsumerImpl.start();(典型的装饰者模式)**
-
-1. 进入switch(this.serviceState)选择结构，this.serviceState初始默认都是Createjust
-
-2. this.checkConfig() 核查配置信息
-3. this.this.copySubscription();复制订阅
-4. 初始化连接工厂 mqClientFactory
-5. 重新负载均衡 rehance
-6. 获取消息 newPullApiWrapper
-7. 判断是否由客户端维护偏移量，或者是服务端维护偏移量
-8. 判断是顺序消费，还是并发消费消息 orderly  or concurrently
-9. 向namesrv注册自身相关信息registerConsumer  如果成功service.state为running
-
-
-
-
-
-
-
-
-
-### 2.PullRequest详解
-
-
-
-
-
-### 3.Cosumer java-api
-
-#### 1. 消费模式
+### 1. 消费模式
 
 1. 集群消费模式(默认) MQ 认为任意一条消息只需要被集群内的任意一个消费者处理即可。
 
@@ -200,13 +185,13 @@ start(controller);
 
 
 
-注意：同一个JVM进程不能用两个同名的consumerGroup
+**<font color='yellow'>注意：同一个JVM进程不能用两个同名的consumerGroup</font>**
 
 
 
 
 
-### Consumer的负载均衡策略
+### 2.Consumer的负载均衡策略
 
 #### 1.平均负载均衡策略(不指定默认的)
 
@@ -251,8 +236,6 @@ start(controller);
 1. 帅选出topic所在的机房
 2. 消费者根据机房所在的Queue进行平均分配策略
 
-
-
 #### 4.一致性Hash策略(Hash 环分配)
 
 把所有消费者，Queue按照一致性hash 算法取值  消费者根据自身计算的hash值，访问离自己最近的Queue.
@@ -260,6 +243,321 @@ start(controller);
 
 
 ####5.用户自定义分配策略：用户自己定义分配策略
+
+
+
+
+
+### 3.RocketMQ 延时消息原理
+
+1，生产者发送一条延迟消息到broker来，broker在写入CommitLog之前会修改topic MessageQueue,转发到延迟队列当中。
+
+2.然后等到延迟时间到了，再通过ScheduleMessageService重新放入CommitLog.
+
+3.写入CommitLog之后再将数据放入目标Topic，以便消费者消费。
+
+
+
+**ScheduleMessageService会每隔1秒钟执行一个executeOnTimeup任务，将消息从延迟队列中写 入正常Topic中。**
+
+**其中有个需要注意的点就是在ScheduleMessageService的start方法中。有一个很关键的CAS操 作，它保证了同一时间只有一个Task执行，也就是同一时间只允许延时传递一个任务到目标队列。保证了效率**
+
+
+
+### 4.RocketMQ 并发消费 顺序消费
+
+并发消费指消费者线程池可以多线程对同一个消费队列进行消费，消费成功之后，取出最小的消息偏移量存储于消费进度存储文件当中。
+
+顺序消费指对同一个队列的消费，再消费前会用锁把队列锁起来，再进行消费。
+
+###4.RocketMQ消费者源码流程
+
+#### 1.defaultPullConsumer.start()
+
+**重点：开启两个异步线程任务  pullMessageService以及 rebanlanceService**
+
+```java 
+// Start pull service
+this.pullMessageService.start();
+// Start rebalance service
+this.rebalanceService.start();
+// Start push service
+```
+
+
+
+##### a, PullMessageService.start
+
+异步线程任务 this.mqClientFactory.start()
+
+1.服务不停止，不停循环，从processQueue take元素。没有的话阻塞，有的话，pullMessage 向broker拿取消息。
+
+**这里的processQueue请求的存入实在relanbance**
+
+2.构建pullRequest，如果是异步消费，设置回调函数 pullOnCallBack。通过netty发送broker
+
+如果是异步的话，broker发来的响应，会被channel 处理调用触发。
+
+```java 
+//==========================PullMessageService=======================================
+public void run() {
+        log.info(this.getServiceName() + " service started");
+
+        while (!this.isStopped()) {
+            try {
+                PullRequest pullRequest = this.pullRequestQueue.take();
+                this.pullMessage(pullRequest);
+            } catch (InterruptedException ignored) {
+            } catch (Exception e) {
+                log.error("Pull Message Service Run Method exception", e);
+            }
+        }
+
+        log.info(this.getServiceName() + " service end");
+    }
+//=====================================================================
+try {
+            this.pullAPIWrapper.pullKernelImpl(
+                pullRequest.getMessageQueue(),
+                subExpression,
+                subscriptionData.getExpressionType(),
+                subscriptionData.getSubVersion(),
+                pullRequest.getNextOffset(),
+                this.defaultMQPushConsumer.getPullBatchSize(),
+                sysFlag,
+                commitOffsetValue,
+                BROKER_SUSPEND_MAX_TIME_MILLIS,
+                CONSUMER_TIMEOUT_MILLIS_WHEN_SUSPEND,
+                CommunicationMode.ASYNC,
+                pullCallback
+            );
+    //=======================================================================
+    public PullResult pullMessage(
+        final String addr,
+        final PullMessageRequestHeader requestHeader,
+        final long timeoutMillis,
+        final CommunicationMode communicationMode,
+        final PullCallback pullCallback
+    ) throws RemotingException, MQBrokerException, InterruptedException {
+        RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.PULL_MESSAGE, requestHeader);
+
+        switch (communicationMode) {
+            case ONEWAY:
+                assert false;
+                return null;
+            case ASYNC:
+                this.pullMessageAsync(addr, request, timeoutMillis, pullCallback);
+                return null;
+            case SYNC:
+                return this.pullMessageSync(addr, request, timeoutMillis);
+            default:
+                assert false;
+                break;
+        }
+
+        return null;
+    }
+    //================================================================
+    
+    
+    
+    
+```
+
+
+
+
+
+
+
+#####b,rebanlaceService.start
+
+异步线程任务
+
+**启动过程的最后会唤醒rebalanceImpl的线程，唤醒之后处理逻辑如下**
+
+1.循环处理，根据配置，选择不同的消费者负载均衡策略。
+
+广播模式下，分配所有的队列给消费者消费。
+
+集群模式下，根据指定的负载均衡策略，分配队列给消费者消费。
+
+```java 
+//====================DefaultMQPushConsumerImpl==========
+this.mQClientFactory.rebalanceImmediately();
+//==================RebalanceService ============================================
+@Override
+    public void run() {
+        log.info(this.getServiceName() + " service started");
+
+        while (!this.isStopped()) {
+            this.waitForRunning(waitInterval);
+            this.mqClientFactory.doRebalance();
+        }
+
+        log.info(this.getServiceName() + " service end");
+    }
+//=======================RebalanceService=======================================
+public void doRebalance(final boolean isOrder) {
+    Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
+    if (subTable != null) {
+        for (final Map.Entry<String, SubscriptionData> entry : subTable.entrySet()) {
+            final String topic = entry.getKey();
+            try {
+            	/* 遍历订阅信息根据 topic 做 rebalance */
+                this.rebalanceByTopic(topic, isOrder);
+            } catch (Throwable e) {
+                if (!topic.startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
+                    log.warn("rebalanceByTopic Exception", e);
+                }
+            }
+        }
+    }
+    this.truncateMessageQueueNotMyTopic();
+}
+//======================RebalanceService========================================
+private void rebalanceByTopic(final String topic, final boolean isOrder) {
+    switch (messageModel) {
+    	// 广播模式
+        case BROADCASTING: {
+            Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
+            if (mqSet != null) {
+            	/* 更新正在处理的队列列表 */
+                boolean changed = this.updateProcessQueueTableInRebalance(topic, mqSet, isOrder);
+                if (changed) {
+                	// 当 rebalance 发生修改时，应更新订阅的版本以通知 broker
+                    this.messageQueueChanged(topic, mqSet, mqSet);
+                    log.info("messageQueueChanged {} {} {} {}",
+                        consumerGroup,
+                        topic,
+                        mqSet,
+                        mqSet);
+                }
+            } else {
+                log.warn("doRebalance, {}, but the topic[{}] not exist.", consumerGroup, topic);
+            }
+            break;
+        }
+        // 集群模式
+        case CLUSTERING: {
+            Set<MessageQueue> mqSet = this.topicSubscribeInfoTable.get(topic);
+            // 根据 topic 和 consumerGroup 获取 consumerId 列表
+            List<String> cidAll = this.mQClientFactory.findConsumerIdList(topic, consumerGroup);
+            if (null == mqSet) {
+                if (!topic.startsWith(MixAll.RETRY_GROUP_TOPIC_PREFIX)) {
+                    log.warn("doRebalance, {}, but the topic[{}] not exist.", consumerGroup, topic);
+                }
+            }
+            if (null == cidAll) {
+                log.warn("doRebalance, {} {}, get consumer id list failed", consumerGroup, topic);
+            }
+            if (mqSet != null && cidAll != null) {
+                List<MessageQueue> mqAll = new ArrayList<MessageQueue>();
+                mqAll.addAll(mqSet);
+                Collections.sort(mqAll);
+                Collections.sort(cidAll);
+                // consumer 之间的消息分配策略算法，默认为 AllocateMessageQueueAveragely
+                AllocateMessageQueueStrategy strategy = this.allocateMessageQueueStrategy;
+                List<MessageQueue> allocateResult = null;
+                try {
+                	/* 执行分配算法 */
+                    allocateResult = strategy.allocate(
+                        this.consumerGroup,
+                        this.mQClientFactory.getClientId(),
+                        mqAll,
+                        cidAll);
+                } catch (Throwable e) {
+                    log.error("AllocateMessageQueueStrategy.allocate Exception. allocateMessageQueueStrategyName={}", strategy.getName(),
+                        e);
+                    return;
+                }
+                Set<MessageQueue> allocateResultSet = new HashSet<MessageQueue>();
+                if (allocateResult != null) {
+                    allocateResultSet.addAll(allocateResult);
+                }
+                /* 更新正在处理的队列列表 */
+                boolean changed = this.updateProcessQueueTableInRebalance(topic, allocateResultSet, isOrder);
+                if (changed) {
+                    log.info(
+                        "rebalanced result changed. allocateMessageQueueStrategyName={}, group={}, topic={}, clientId={}, mqAllSize={}, cidAllSize={}, rebalanceResultSize={}, rebalanceResultSet={}",
+                        strategy.getName(), consumerGroup, topic, this.mQClientFactory.getClientId(), mqSet.size(), cidAll.size(),
+                        allocateResultSet.size(), allocateResultSet);
+                    // 当 rebalance 发生修改时，应更新订阅的版本以通知 broker
+                    this.messageQueueChanged(topic, mqSet, allocateResultSet);
+                }
+            }
+            break;
+        }
+        default:
+            break;
+    }
+}
+
+//==========================================================================
+```
+
+
+
+
+
+2.分配请求到ProcessQueue
+
+构建不同的pullRequest放入PullRequestList当中。
+
+之后利用定时线程池  将PullRequestList 一次放入ProcessQueue当中去。
+
+```java 
+//===========================RebalancePushImpl=============================================
+ for (MessageQueue mq : mqSet) {
+            if (!this.processQueueTable.containsKey(mq)) {
+                if (isOrder && !this.lock(mq)) {
+                    log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
+                    continue;
+                }
+
+                this.removeDirtyOffset(mq);
+                ProcessQueue pq = new ProcessQueue();
+                long nextOffset = this.computePullFromWhere(mq);
+                if (nextOffset >= 0) {
+                    ProcessQueue pre = this.processQueueTable.putIfAbsent(mq, pq);
+                    if (pre != null) {
+                        log.info("doRebalance, {}, mq already exists, {}", consumerGroup, mq);
+                    } else {
+                        log.info("doRebalance, {}, add a new mq, {}", consumerGroup, mq);
+                        PullRequest pullRequest = new PullRequest();
+                        pullRequest.setConsumerGroup(consumerGroup);
+                        pullRequest.setNextOffset(nextOffset);
+                        pullRequest.setMessageQueue(mq);
+                        pullRequest.setProcessQueue(pq);
+                        pullRequestList.add(pullRequest);
+                        changed = true;
+                    }
+                } else {
+                    log.warn("doRebalance, {}, add new mq failed, {}", consumerGroup, mq);
+                }
+            }
+        }
+
+        this.dispatchPullRequest(pullRequestList);
+//==========================DefaultMQPushConsumerImpl==========================================
+public void dispatchPullRequest(List<PullRequest> pullRequestList) {
+    for (PullRequest pullRequest : pullRequestList) {
+        this.defaultMQPushConsumerImpl.executePullRequestImmediately(pullRequest);
+        log.info("doRebalance, {}, add a new pull request {}", consumerGroup, pullRequest);
+    }
+}
+//=======================PullMessageService=======================================
+ public void executePullRequestImmediately(final PullRequest pullRequest) {
+        try {
+            this.pullRequestQueue.put(pullRequest);
+        } catch (InterruptedException e) {
+            log.error("executePullRequestImmediately pullRequestQueue.put", e);
+        }
+    }
+
+```
+
+
 
 
 
@@ -333,6 +631,168 @@ MessageQueueSelector 队列选择器，如果没有该参数，那么 该选择�
 #### 3.单向发送
 
 只管发送，不管发送结果.
+
+
+
+#### 4.源码分析
+
+#####1.DefaultMQProducer启动
+
+######a,创建MQClientFactory
+
+开始处于 CREATE_JUST状态 ，核心是创建MQClientFacoty .修改serviceState的状态为RUNNING
+
+```java 
+public void start(final boolean startFactory) throws MQClientException {
+        switch (this.serviceState) {
+            case CREATE_JUST:
+                this.serviceState = ServiceState.START_FAILED;
+
+                this.checkConfig();
+
+                if (!this.defaultMQProducer.getProducerGroup().equals(MixAll.CLIENT_INNER_PRODUCER_GROUP)) {
+                    this.defaultMQProducer.changeInstanceNameToPID();
+                }
+
+                this.mQClientFactory = MQClientManager.getInstance().getAndCreateMQClientInstance(this.defaultMQProducer, rpcHook);
+
+                boolean registerOK = mQClientFactory.registerProducer(this.defaultMQProducer.getProducerGroup(), this);
+                if (!registerOK) {
+                    this.serviceState = ServiceState.CREATE_JUST;
+                    throw new MQClientException("The producer group[" + this.defaultMQProducer.getProducerGroup()
+                        + "] has been created before, specify another name please." + FAQUrl.suggestTodo(FAQUrl.GROUP_NAME_DUPLICATE_URL),
+                        null);
+                }
+
+                this.topicPublishInfoTable.put(this.defaultMQProducer.getCreateTopicKey(), new TopicPublishInfo());
+
+                if (startFactory) {
+                    mQClientFactory.start();
+                }
+
+                log.info("the producer [{}] start OK. sendMessageWithVIPChannel={}", this.defaultMQProducer.getProducerGroup(),
+                    this.defaultMQProducer.isSendMessageWithVIPChannel());
+                this.serviceState = ServiceState.RUNNING;
+                break;
+```
+
+
+
+######b.MQclientFactory.start
+
+根据service的状态 mqfactory.start有不同的处理逻辑
+
+```java 
+synchronized (this) {
+            switch (this.serviceState) {
+                case CREATE_JUST:
+                    this.serviceState = ServiceState.START_FAILED;
+                    // If not specified,looking address from name server
+                    if (null == this.clientConfig.getNamesrvAddr()) {
+                        this.mQClientAPIImpl.fetchNameServerAddr();
+                    }
+                    // Start request-response channel
+                    this.mQClientAPIImpl.start();
+                    // Start various schedule tasks
+                    this.startScheduledTask();
+                    // Start pull service
+                    this.pullMessageService.start();
+                    // Start rebalance service
+                    this.rebalanceService.start();
+                    // Start push service
+                    this.defaultMQProducer.getDefaultMQProducerImpl().start(false);
+                    log.info("the client factory [{}] start OK", this.clientId);
+                    this.serviceState = ServiceState.RUNNING;
+                    break;
+                case RUNNING:
+                    break;
+                case SHUTDOWN_ALREADY:
+                    break;
+                case START_FAILED:
+                    throw new MQClientException("The Factory object[" + this.getClientId() + "] has been created before, and failed.", null);
+                default:
+                    break;
+            }
+```
+
+
+
+##### 2.DefaultProducer.sendMsg()
+
+###### a,获取TopInfo
+
+如果本地没有的话，通过请求NameSrv获得
+
+```java 
+//=========================DeFaultProducerImpl=======================  
+public SendResult send(Message msg,
+        long timeout) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
+        return this.sendDefaultImpl(msg, CommunicationMode.SYNC, null, timeout);
+    }
+//========================DeFaultProducerImpl===========================
+ TopicPublishInfo topicPublishInfo = this.tryToFindTopicPublishInfo(msg.getTopic());
+//=========================TopicPublishInfo=============================
+ private TopicPublishInfo tryToFindTopicPublishInfo(final String topic) {
+        TopicPublishInfo topicPublishInfo = this.topicPublishInfoTable.get(topic);
+        if (null == topicPublishInfo || !topicPublishInfo.ok()) {
+            this.topicPublishInfoTable.putIfAbsent(topic, new TopicPublishInfo());
+            this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic);
+            topicPublishInfo = this.topicPublishInfoTable.get(topic);
+        }
+
+        if (topicPublishInfo.isHaveTopicRouterInfo() || topicPublishInfo.ok()) {
+            return topicPublishInfo;
+        } else {
+            this.mQClientFactory.updateTopicRouteInfoFromNameServer(topic, true, this.defaultMQProducer);
+            topicPublishInfo = this.topicPublishInfoTable.get(topic);
+            return topicPublishInfo;
+        }
+    }
+//=======================MQClientInstance====================================
+  public boolean updateTopicRouteInfoFromNameServer(final String topic) {
+        return updateTopicRouteInfoFromNameServer(topic, false, null);
+    }
+
+```
+
+
+
+
+
+###### b,选择MessageQueue
+
+采取自增对queue数量取模的方式，选择一个MessageQueue 发送消息。
+
+```java 
+      MessageQueue mqSelected = this.selectOneMessageQueue(topicPublishInfo, lastBrokerName);
+//======================MQFaultStrategy============================================
+    public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
+        if (this.sendLatencyFaultEnable) {
+            try {
+                int index = tpInfo.getSendWhichQueue().getAndIncrement();
+                for (int i = 0; i < tpInfo.getMessageQueueList().size(); i++) {
+                    int pos = Math.abs(index++) % tpInfo.getMessageQueueList().size();
+                    if (pos < 0)
+                        pos = 0;
+                    MessageQueue mq = tpInfo.getMessageQueueList().get(pos);
+                    if (latencyFaultTolerance.isAvailable(mq.getBrokerName())) {
+                        if (null == lastBrokerName || mq.getBrokerName().equals(lastBrokerName))
+                            return mq;
+                    }
+                }
+```
+
+
+
+###### c，真正发送消息
+
+找到真正的brokerAddr,发送消息。
+
+```java 
+sendResult = this.sendKernelImpl(msg, mq, communicationMode, sendCallback, topicPublishInfo, timeout - costTime);
+```
+
+
 
 
 
@@ -422,8 +882,6 @@ sendMessageThreadPoolNums = 4
 1. 将需要顺序的消费发送至同一个 Queue中，所有消费只消费这个Queue的消息。
 
 ### 5.如何处理消息的堆积？
-
-
 
 1. 如果consumer数量小于Queue数量，则新建消费者处理。
 2. 如果consumer数量已经大于Queue数量，新建TOPIC 存储堆积的Topic的消息。上线消费者专门用于转移消息，不做业务处理。再新建消费者处理堆积的消息。

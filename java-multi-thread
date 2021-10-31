@@ -21,6 +21,51 @@ LongAddr 当并发非常大时,分为数组，每个数组单独进行自选锁�
 
 wait() notify()  notifyAll()  notify()会唤醒进入wait等待队列池的随机一个线程
 
+
+
+
+
+#1.synchronized锁升级的过程.
+
+1.无锁---------》偏向锁
+
+1. 如果一个线程进入同步代码块，如果markword里面的偏向锁标志位可以，那么就可以进行偏向锁，否则直接进入轻量级锁.
+
+2. 如果允许偏向锁，判断当前markword存储hashCode的是否指向是当前线程ID，如果是，锁可重入，继续执行代码.
+3. 如果不是当前线程ID，CAS操作，将当前线程ID，赋值到当前hashCode,CAS成功，获得锁。失败，表示存在竞争条件。当前线程再持有偏向锁的线程到达安全点之后，撤销偏向锁，将锁对象的markword的线程ID，清空，升级转为轻量级锁。
+
+**注意：**
+
+**1.如果一个对象调用过hashCode或者System.identyHashCode,也就是生成过hashCode值，之后，那么次对象不能作为偏向锁对象 **
+
+**2.如果处于偏向锁状态的对象，计算了hashCode值，那么会由偏向锁升级为自旋锁。**
+
+
+
+
+
+2.偏向锁-------->轻量级锁
+
+1. 如果存在竞争条件 ，当前线程首先把markword复制到线程栈帧的LockRecord中，并且尝试把markword里面的值CAS替换为当前线程栈帧LockRecord的地址。
+2. 如果成功，设定锁的标志位为00，执行同步代码块。
+
+3. 如果失败，再次自旋CAS替换当前线程栈帧的LockRecord的地址  到达一定次数后，膨胀为重量级锁，锁的标志为变为10，并且锁对象的markword变为monitor的指针
+4. 还处于同步代码块的线程，再完成同步代码块之后,CAS 还原markword会失败。之后会进入等待，被唤醒时，重新使用重量级锁竞争。
+
+ 
+
+
+
+3.轻量级锁-------》重量级锁
+
+1. 重量级锁 entryset -------->monitor锁------>waitset
+2. 对象的markword替换为monitor的指针 重入monitor的计数器加1
+3. 如果线程进入睡眠，进入waitset队列。
+
+
+
+
+
 2.4 ReenTrantLock
 可以完全替代synchronized
 不同点: 可以设置公平锁,非公平锁
@@ -131,7 +176,7 @@ put()容量满时，会阻塞当前线程。直至有剩余容量。 take()无�
 
 
 
-## 线程池
+#B 线程池
 
 ### 1.ThreadPoolExecutor
 
@@ -515,7 +560,7 @@ try {
 
 
 
-####d.获取task为null的话，跳出循环，执行processWorkerExit方法
+#####d.获取task为null的话，跳出循环，执行processWorkerExit方法
 
 // 如果completedAbruptly值为true，则说明线程执行时出现了异常，需要 将workerCount减1；
 
@@ -543,6 +588,14 @@ try {
 
 
 
+如果之后再次创建一个新的线程来执行后续的任务
+
+```java 
+ addWorker(null, false);
+```
+
+
+
 
 
 
@@ -562,7 +615,7 @@ int recheck = ctl.get();
 
 
 
-成功的话，之后如果线程仍然是RUNNING状态的话，并且线程池中没有工作线程的话，那么添加一个线程。取队列取任务执行。
+成功的话，之后如果线程仍然是RUNNING状态的话，并且线程池中没有工作线程的话，那么添加一个线程。取队列取任务执行。此时addWorker 方法 进入的话，如果达到核心数的，并且队列容量满了或者超出最大线程数的话，都会直接跳出。如果队列没满的话，那么会直接放入队列。等待存活的线程执行。
 
 ```java 
 else if (workerCountOf(recheck) == 0)
