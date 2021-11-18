@@ -1,0 +1,32 @@
+First of all, I‘m grateful for giving me this opportunity to attend the interview. My name is xxx. The first project I involved in was created by  SSM Framework . Since 2018, I have been exposed to micro-services built by SpringCloud, and used K8S to realize the automatic deployment of services and dynamic capacity expansion. Our projects  were  mostly developed to provide services about Internet finanice, like openingAccount or  geting authentication from police,unionpay,tonglianpay. 
+
+
+
+Our Customers should commit their self-information to our system,then we send  these requests to gateway  for getting authentication from these channels.for  the same custom.if they have opened their own account In our system.then wo only return their old  eacctno to them sothat  prevent to open a dublicated account.
+
+
+
+
+
+In my spare time, I often study the implementation principles and source code flow of some mainstream frameworks, Such as the overall process of Spring IoC, Zookeeper's election process, Netty's request process, and so on. I also hope that I can go further and further on the road of IT technology. Usually, l also browse the official websites of open source frameworks and communicate with others to discuss various issues on github  for enhancing my own technical strength. That's all my self-introduction. Thank you.
+
+==========================================================================
+
+
+
+
+
+
+
+
+
+In the way   thanks.
+
+
+
+
+
+
+
+首先，非常感谢给予了我这次机会来参加面试。我的名字是xxx.   我参加的第一个项目是传统的ssm框架项目。从2018年我开始接触SpringCloud搭建的微服务。并且用K8S实现服务的自动部署。动态扩容。我在闲暇时间经常研究一些主流框架的实现原理与源码流程。比如spring ioc的整体流程。zookeeper的选举流程。netty的请求流程等等。我之后也希望自己能在IT技术的路程上走的越来越远。我平常也会看开源框架的官网,与别人交流，讨论各类issue来增强自己的技术实力。以上就是我的自我介绍。谢谢。
+
